@@ -132,6 +132,7 @@ class KV3ActivationHandler(KerasV3LayerHandler):
 
         config['activation'] = activation.__name__
         config['class_name'] = class_name
+        config['n_in'] = prod(in_tensors[0].shape[1:])  # type: ignore
         return (config,)
 
 
@@ -218,5 +219,6 @@ class KV3HardActivationHandler(KerasV3LayerHandler):
         config['class_name'] = 'ELU'
         config['activ_param'] = float(layer.alpha)
         config['activation'] = 'elu'
+        config['n_in'] = prod(in_tensors[0].shape[1:])  # type: ignore
 
         return (config,)
