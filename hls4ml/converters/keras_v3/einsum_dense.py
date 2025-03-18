@@ -29,8 +29,13 @@ def strip_batch_dim(equation: str, einsum_dense: bool = True):
             assert inp0[0] not in inp1, f'Error in eq: {equation}: Batch dim is used in the kernel.'
             inp0, out = inp0[1:], out[1:]
     else:
-        assert inp0[0] == inp1[0] == out[0], f'Error in eq: {equation}: Batch dim mismatch for the inputs and output.'
-        inp0, inp1, out = inp0[1:], inp1[1:], out[1:]
+        if inp0.startswith('...'):
+            assert inp1.startswith('...') and out.startswith(
+                '...'
+            ), f'Error in eq: {equation}: Batch dim mismatch for the inputs and output.'
+        else:
+            assert inp0[0] == inp1[0] == out[0], f'Error in eq: {equation}: Batch dim mismatch for the inputs and output.'
+            inp0, inp1, out = inp0[1:], inp1[1:], out[1:]
     return f'{inp0},{inp1}->{out}'
 
 
