@@ -222,3 +222,19 @@ class KV3HardActivationHandler(KerasV3LayerHandler):
         config['n_in'] = prod(in_tensors[0].shape[1:])  # type: ignore
 
         return (config,)
+
+
+@register
+class KV3ReshapeHandler(KerasV3LayerHandler):
+    handles = ('keras.src.layers.reshaping.reshape.Reshape', 'keras.src.layers.reshaping.flatten.Flatten')
+
+    def handle(
+        self,
+        layer: 'keras.layers.Reshape',
+        in_tensors: Sequence['KerasTensor'],
+        out_tensors: Sequence['KerasTensor'],
+    ):
+        return {
+            'class_name': 'Reshape',
+            'target_shape': list(out_tensors[0].shape[1:]),
+        }
