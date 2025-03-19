@@ -76,24 +76,29 @@ class KV3MergeHandler(KerasV3LayerHandler):
         output_shape = list(out_tensors[0].shape[1:])
 
         cls_name = cls_name or layer.__class__.__name__
-        config: dict[str, Any] = {
-            'output_shape': output_shape,
-            'op': cls_name.lower(),
-        }
+        config: dict[str, Any] = {'output_shape': output_shape}
 
+        op = cls_name.lower()
         match cls_name.lower():
             case 'Concatenate':
                 rank = len(output_shape)
                 class_name = f'Concatenate{rank}d'
                 config['axis'] = layer.axis
             case 'Dot':
-                class_name = f'Dot{len(output_shape)}d'
-                rank = len(output_shape)
-                assert rank == 1, f"Dot product only supported for 1D tensors, got {rank}D on layer {layer.name}"
+                msg = (
+                    'Dot product only supported flatten tensors, got input shapes'
+                    f'{in_tensors[0].shape} and {in_tensors[1].shape} for layer {layer.name}.'
+                )
+                assert all(len(t.shape) == 2 for t in in_tensors), msg
+                assert in_tensors[0].shape[1] == in_tensors[1].shape[0], f'Input shape mismatch for layer {layer.name}.'
+                class_name = 'Dot'
+                op = 'dot1d'
+                config['axes'] = layer.axes
             case _:
                 class_name = 'Merge'
 
         config['class_name'] = class_name
+        config['op'] = op
         return config
 
 
