@@ -16,19 +16,27 @@ class EinsumRecipe(TypedDict):
 
 
 def _validate_einsum_expr(fn: str, shape0: tuple[int, ...], shape1: tuple[int, ...]):
-    '''Validate, resolve broadcasting, and compute output shape for einsum string.
+    """Validate, resolve broadcasting, and compute output shape for einsum string
 
-    Args:
-        fn: einsum string, e.g. 'ij,jk->ik'
-        shape0: shape of input0
-        shape1: shape of input1
+    Parameters
+    ----------
+    fn : str
+        einsum string, e.g. 'ij,jk->ik'
+    shape0 : tuple[int,...]
+        shape of input0
+    shape1 : tuple[int,...]
+        shape of input1
 
-    Returns:
-        tuple[str, tuple[int,...]]: einsum string w/o broadcasting, and output shape
+    Returns
+    -------
+    tuple[str, tuple[int,...]]
+        einsum string w/o broadcasting, and output shape
 
-    Raises:
-        ValueError: If the einsum string is invalid, or if it is incompatible with the input shapes
-    '''
+    Raises
+    ------
+    ValueError
+        If the einsum string is invalid, or if it is incompatible with the input shapes
+    """
     inp, out = map(str.strip, fn.split('->'))
     in0, in1 = map(str.strip, inp.split(','))
     alphabets = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -67,6 +75,8 @@ def _validate_einsum_expr(fn: str, shape0: tuple[int, ...], shape1: tuple[int, .
 
     # Invalid broadcasting
     if '0' in sax_in0 or '0' in sax_in1 or '0' in sax_out:
+        if '0' in sax_in0 and '0' in sax_in1:
+            raise ValueError(f"einsum string {fn} is invalid: both input0 and input1 allows broadcasting")
         if '0' not in sax_out:
             raise ValueError(f"einsum string {fn} is invalid: output does not allow broadcasting, but inputs do")
         if '0' not in sax_in0 and '0' not in sax_in1:
@@ -74,49 +84,35 @@ def _validate_einsum_expr(fn: str, shape0: tuple[int, ...], shape1: tuple[int, .
 
     # Output index out of nowhere
     if remaining := sax_out - sax_in0 - sax_in1:
-        raise ValueError(f'einsum string {fn} is invalid: output subscripts {remaining} not found in inputs')
+        raise ValueError(f"einsum string {fn} is invalid: output subscripts {remaining} not found in inputs")
 
     _common_in = sax_in0 & sax_in1
 
-    if '0' in sax_in0 and '0' in sax_in1:
-        # Simultaneous axes expansion in both inputs
-        n_boardcast0 = len(shape0) - len(sax_in0) + 1
-        n_boardcast1 = len(shape1) - len(sax_in1) + 1
-        assert n_boardcast0 == n_boardcast1, f"'...' expands to {n_boardcast0} and {n_boardcast1}-axis in input0 and input1."
-        # Replace expansion indices with free indices
-        in0 = in0.replace('0', free_indices[:n_boardcast0])
-        in1 = in1.replace('0', free_indices[:n_boardcast1])
-        out = out.replace('0', free_indices[:n_boardcast0])
-        ax_in0, ax_in1, ax_out = list(in0), list(in1), list(out)
-        _common_in = set(ax_in0) & set(ax_in1)
-
+    # Invalid input dimensions
+    if '0' in sax_in0:
+        if len(sax_in0) - 1 > len(shape0):
+            raise ValueError(f"Input0 requires at least {len(sax_in0)-1} dimensions, but only {len(shape0)} given")
+        # Replace broadcasting indices with free indices
+        n_broadcast = len(shape0) - len(sax_in0) + 1
+        in0 = in0.replace('0', free_indices[:n_broadcast])
+        out = out.replace('0', free_indices[:n_broadcast])
+        ax_in0 = list(in0)
+        ax_out = list(out)
     else:
-        # Axes expansion in input0 or input1 only
-        if '0' in sax_in0:
-            if len(sax_in0) - 1 > len(shape0):
-                raise ValueError(f'Input0 requires at least {len(sax_in0)-1} dimensions, but only {len(shape0)} given')
-            # Replace auto expansion indices with free indices
-            n_broadcast = len(shape0) - len(sax_in0) + 1
-            in0 = in0.replace('0', free_indices[:n_broadcast])
-            out = out.replace('0', free_indices[:n_broadcast])
-            ax_in0 = list(in0)
-            ax_out = list(out)
-        else:
-            if len(sax_in0) != len(shape0):
-                raise ValueError(f'Input0 requires {len(sax_in0)} dimensions, but {len(shape0)} is given')
-
-        if '0' in sax_in1:
-            if len(sax_in1) - 1 > len(shape1):
-                raise ValueError(f'Input1 requires at least {len(sax_in1)-1} dimensions, but only {len(shape1)} given')
-            # Replace expansion indices with free indices
-            n_broadcast = len(shape1) - len(sax_in1) + 1
-            in1 = in1.replace('0', free_indices[:n_broadcast])
-            out = out.replace('0', free_indices[:n_broadcast])
-            ax_in1 = list(in1)
-            ax_out = list(out)
-        else:
-            if len(sax_in1) != len(shape1):
-                raise ValueError(f'Input1 requires {len(sax_in1)} dimensions, but {len(shape1)} is given')
+        if len(sax_in0) != len(shape0):
+            raise ValueError(f"Input0 requires {len(sax_in0)} dimensions, but {len(shape0)} is given")
+    if '0' in sax_in1:
+        if len(sax_in1) - 1 > len(shape1):
+            raise ValueError(f"Input1 requires at least {len(sax_in1)-1} dimensions, but only {len(shape1)} given")
+        # Replace broadcasting indices with free indices
+        n_broadcast = len(shape1) - len(sax_in1) + 1
+        in1 = in1.replace('0', free_indices[:n_broadcast])
+        out = out.replace('0', free_indices[:n_broadcast])
+        ax_in1 = list(in1)
+        ax_out = list(out)
+    else:
+        if len(sax_in1) != len(shape1):
+            raise ValueError(f"Input1 requires {len(sax_in1)} dimensions, but {len(shape1)} is given")
 
     # Input dimension mismatch
     for a in _common_in:
@@ -132,16 +128,22 @@ def _validate_einsum_expr(fn: str, shape0: tuple[int, ...], shape1: tuple[int, .
 
 
 def parse_einsum(fn: str, input_shape0: tuple[int, ...], input_shape1: tuple[int, ...]) -> EinsumRecipe:
-    '''Parse einsum operation on two input arrays, return a recipe for execution.
+    """Parse einsum operation on two input arrays, return a recipe for execution
 
-    Args:
-        fn: einsum string, e.g. 'ij,jk->ik'
-        input_shape0: shape of the first input array
-        input_shape1: shape of the second input array
+    Parameters
+    ----------
+    fn : str
+        einsum string, e.g. 'ij,jk->ik'
+    input : np.ndarray
+        input0, the first input array
+    input1 : np.ndarray
+        input1, the second input array
 
-    Returns:
-        EinsumRecipe: einsum recipe; executed by _exec_einsum
-    '''
+    Returns
+    -------
+    EinsumRecipe
+        einsum recipe; executed by _exec_einsum
+    """
 
     fn, _ = _validate_einsum_expr(fn, input_shape0, input_shape1)
 
@@ -195,16 +197,22 @@ def parse_einsum(fn: str, input_shape0: tuple[int, ...], input_shape1: tuple[int
 
 
 def _exec_einsum(recipe: EinsumRecipe, input0: np.ndarray, input1: np.ndarray) -> np.ndarray:
-    '''Execute einsum operation on two input arrays.
+    """Execute einsum operation on two input arrays
 
-    Args:
-        recipe: einsum recipe
-        input0: the first input array
-        input1: the second input array
+    Parameters
+    ----------
+    recipe : EinsumRecipe
+        einsum recipe
+    input0 : np.ndarray
+        input0, the first input array
+    input1 : np.ndarray
+        input1, the second input array
 
-    Returns:
-        np.ndarray: output array
-    '''
+    Returns
+    -------
+    np.ndarray
+        output array
+    """
     sum_axis0, sum_axis1 = recipe['direct_sum_axis']
     if sum_axis0:
         input0 = np.sum(input0, axis=sum_axis0)
@@ -226,18 +234,23 @@ def _exec_einsum(recipe: EinsumRecipe, input0: np.ndarray, input1: np.ndarray) -
 
 
 def einsum(fn: str, input0: np.ndarray, input1: np.ndarray) -> np.ndarray:
-    '''Execute einsum operation on two input arrays.
+    """Execute einsum operation on two input arrays.
 
-    Warning:
-        Order of multiplication is reversed -- watchout if you are using non-commutative operators
+    WARNING: Order of multiplication is reversed -- watchout if you are using non-commutative operators
 
-    Args:
-        fn: einsum string, e.g. 'ij,jk->ik'
-        input0: the first input array
-        input1: the second input array
+    Parameters
+    ----------
+    fn : str
+        einsum string, e.g. 'ij,jk->ik'
+    input : np.ndarray
+        input0, the first input array
+    input1 : np.ndarray
+        input1, the second input array
 
-    Returns:
-        np.ndarray: output array
-    '''
+    Returns
+    -------
+    np.ndarray
+        output array
+    """
     recipe = parse_einsum(fn, input0.shape, input1.shape)
     return _exec_einsum(recipe, input0, input1)

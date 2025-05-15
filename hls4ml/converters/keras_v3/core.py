@@ -1,8 +1,7 @@
 import inspect
 import typing
-from collections.abc import Sequence
 from math import prod
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -27,7 +26,7 @@ class KV3DenseHandler(KerasV3LayerHandler):
 
         kernel = self.load_weight(layer, 'kernel')
         bias = self.load_weight(layer, 'bias') if layer.use_bias else None
-        n_in, n_out = kernel.shape  # type: ignore
+        n_in, n_out = kernel.shape
 
         config = {
             'data_format': 'channels_last',

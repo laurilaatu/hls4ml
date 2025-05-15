@@ -123,6 +123,40 @@ const unsigned* const {config_name}::perm_strides = {config_name}_perm_strides;
 transpose_function_template = 'nnet::transpose<{input_t}, {output_t}, {config_name}>({input}, {output});'
 
 
+def transpose_config_gen(name: str, shape: tuple[int, ...], perm: tuple[int, ...]):
+    """
+    Generate a configuration string for a permute operation. Operates by mapping the output index to input input index by:
+     - unravel the output index
+     - map each dimension to the corresponding stride in the input tensor, sum
+    The operation can be expressed as:
+
+    new_shape = tuple(shape[i] for i in perm)
+    strides = np.cumprod((shapes[1:] + (1,))[::-1])[::-1]
+    perm_strides = [strides[i] for i in perm]
+    out[index] = inp[np.dot(np.unravel_index(index, new_shape), perm_strides)]
+
+    Args:
+        name (str): The name of the configuration.
+        shape (tuple[int, ...]): The shape of the input tensor.
+        perm (tuple[int, ...]): The permutation of the dimensions.
+
+    Returns:
+        str: The formatted configuration string for the permute operation.
+    """
+    new_shape = tuple(shape[i] for i in perm)
+    strides = np.cumprod((shape[1:] + (1,))[::-1])[::-1]
+    perm_strides = tuple(int(strides[i]) for i in perm)
+    return transpose_config_template.format(
+        dims=len(shape),
+        N=prod(shape),
+        from_shape=', '.join(str(x) for x in shape),
+        perm=', '.join(str(x) for x in perm),
+        perm_strides=', '.join(str(x) for x in perm_strides),
+        to_shape=', '.join(str(x) for x in new_shape),
+        config_name=name,
+    )
+
+
 class TransposeConfigTemplate(LayerConfigTemplate):
     def __init__(self):
         super().__init__(Transpose)
@@ -131,8 +165,7 @@ class TransposeConfigTemplate(LayerConfigTemplate):
         shape = tuple(node.get_input_variable().shape)
         perm = tuple(node.get_attr('perm'))
         name = f'config{node.index}'
-        conf = node.model.config.backend.transpose_config_gen(name, shape, perm)
-        return transpose_config_template.format(**conf)
+        return transpose_config_gen(name, shape, perm)
 
 
 class TransposeFunctionTemplate(FunctionCallTemplate):
