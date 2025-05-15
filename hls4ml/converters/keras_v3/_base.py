@@ -1,6 +1,7 @@
 import typing
+from collections.abc import Callable, Sequence
 from types import FunctionType
-from typing import Any, Callable, Sequence, TypedDict, overload
+from typing import Any, TypedDict, overload
 
 
 class DefaultConfig(TypedDict, total=False):
@@ -35,29 +36,26 @@ def register(cls: str) -> Callable[[T_kv3_handler], T_kv3_handler]: ...
 
 
 def register(cls: str | type):
-    """Decorator to register a handler for a specific layer class. Suggested to decorate the `KerasV3LayerHandler` class.
+    '''Decorator to register a handler for a specific layer class. Suggested to decorate the `KerasV3LayerHandler` class.
 
-    Parameters
-    ----------
-    cls : str|type
-        If str, the key to register the handler under. If type, the class to register the handler for.
+    Args:
+        cls: If str, the key to register the handler under. If type, the class to register the handler for.
 
-    Examples
-    --------
-    ```python
-    @keras_dispatcher.register
-    class MyLayerHandler(KerasV3LayerHandler):
-        handles = ('my_package.src.submodule.MyLayer', 'MyLayer2')
+    Examples:
+        ```python
+        @keras_dispatcher.register
+        class MyLayerHandler(KerasV3LayerHandler):
+            handles = ('my_package.src.submodule.MyLayer', 'MyLayer2')
 
-        def handle(self, layer, inp_tensors, out_tensors):
+            def handle(self, layer, inp_tensors, out_tensors):
+                # handler code
+
+
+        @keras_dispatcher.register('MyLayer3')
+        def my_layer_handler(layer, inp_tensors, out_tensors):
             # handler code
-
-
-    @keras_dispatcher.register('MyLayer3')
-    def my_layer_handler(layer, inp_tensors, out_tensors):
-        # handler code
-    ```
-    """
+        ```
+    '''
 
     def deco(func):
         if isinstance(cls, str):
@@ -80,7 +78,7 @@ def maybe_add_attrs(config: dict[str, Any] | DefaultConfig, obj: Any, *attrs: st
 
 
 class KerasV3LayerHandler:
-    """Base class for keras v3 layer handlers. Subclass this class to create a handler for a specific layer type."""
+    '''Base class for keras v3 layer handlers. Subclass this class to create a handler for a specific layer type.'''
 
     handles = ()
     default_config: DefaultConfig
@@ -91,41 +89,35 @@ class KerasV3LayerHandler:
         in_tensors: Sequence['KerasTensor'],
         out_tensors: Sequence['KerasTensor'],
     ) -> tuple[dict[str, Any], ...]:
-        """Handle a keras layer. Return a tuple of dictionaries, each
-        dictionary representing a layer (module) in the HLS model. One
-        layer may correspond one or more dictionaries (e.g., layers with
-        activation functions will be split into two layers).
+        '''Handle a keras layer. Return a tuple of dictionaries, each dictionary representing
+        a layer (module) in the HLS model.
 
-        Some common attributes are automatically added to the dictionary
-        if the handler returns a single dictionary. If the handler
-        returns multiple dictionaries, the attributes must be added
-        manually. Anything returned by the handler will override the
-        automatic attributes.
+        One layer may correspond to one or more dictionaries
+        (e.g., layers with activation functions will be split into two layers).
 
-        Automatic attributes: - name - class_name - module -
-        input_keras_tensor_names - input_shape -
-        output_keras_tensor_names
+        Some common attributes are automatically added to the dictionary if the handler returns a single dictionary.
+        If the handler returns multiple dictionaries, the attributes must be added manually.
+        Anything returned by the handler will override the automatic attributes.
 
-        If the layer has an activation function, an additional
-        dictionary will be added to the return value representing the
-        activation function.
+        Automatic attributes:
+            - name
+            - class_name
+            - module
+            - input_keras_tensor_names
+            - input_shape
+            - output_keras_tensor_names
 
+        If the layer has an activation function, an additional dictionary will be added to the return value
+        representing the activation function.
 
-        Parameters
-        ----------
-        layer : keras.Layer
-            The layer to be converted to HLS configuration(s).
-        in_tensors : Sequence[KerasTensor]
-            The list of input tensors to the layer.
-        out_tensors : Sequence[KerasTensor]
-            The list of output tensors from the layer.
+        Args:
+            layer: The layer to be converted to HLS configuration(s).
+            in_tensors: The list of input tensors to the layer.
+            out_tensors: The list of output tensors from the layer.
 
-        Returns
-        -------
-        dict[str, Any] | tuple[dict[str, Any], ...]
-            layer configuration(s) for the HLS model to be consumed by
-            the ModelGraph constructor
-        """
+        Returns:
+            Layer configuration(s) for the HLS model to be consumed by the ModelGraph constructor.
+        '''
 
         name = layer.name
         class_name = layer.__class__.__name__
@@ -151,7 +143,7 @@ class KerasV3LayerHandler:
         if isinstance(config0, tuple):
             for conf in config0:
                 for key in mandatory_keys:
-                    assert key in conf, f"Key {key} missing from layer {name} handled by {self.__class__.__name__}"
+                    assert key in conf, f'Key {key} missing from layer {name} handled by {self.__class__.__name__}'
             return config0
 
         config = {}
@@ -174,8 +166,8 @@ class KerasV3LayerHandler:
         activation = getattr(layer, 'activation', None)
         name = layer.name
         if activation not in (keras.activations.linear, None):
-            assert len(out_tensors) == 1, f"Layer {name} has more than one output, but has an activation function"
-            assert isinstance(activation, FunctionType), f"Activation function for layer {name} is not a function"
+            assert len(out_tensors) == 1, f'Layer {name} has more than one output, but has an activation function'
+            assert isinstance(activation, FunctionType), f'Activation function for layer {name} is not a function'
             intermediate_tensor_name = f'{out_tensors[0].name}_activation'
             act_cls_name = activation.__name__
             act_config = {
@@ -197,20 +189,15 @@ class KerasV3LayerHandler:
         return {}
 
     def load_weight(self, layer: 'keras.Layer', key: str):
-        """Load a weight from a layer.
+        '''Load a weight from a layer.
 
-        Parameters
-        ----------
-        layer : keras.Layer
-            The layer to load the weight from.
-        key : str
-            The key of the weight to load.
+        Args:
+            layer: The layer to load the weight from.
+            key: The key of the weight to load.
 
-        Returns
-        -------
-        np.ndarray
-            The weight.
-        """
+        Returns:
+            np.ndarray: The weight.
+        '''
         import keras
 
         return keras.ops.convert_to_numpy(getattr(layer, key))
