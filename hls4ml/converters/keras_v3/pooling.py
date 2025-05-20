@@ -52,18 +52,22 @@ class KV3PoolingHandler(KerasV3LayerHandler):
 
         pool_size: tuple[int, ...] = layer.pool_size if isinstance(layer, BasePooling) else tuple(px_in_shape)
 
+        strides = layer.strides if isinstance(layer, BasePooling) else pool_size
+        padding = layer.padding if isinstance(layer, BasePooling) else 'valid'
         config = gen_conv_config(
             in_shape=in_shape,
             out_shape=out_shape,
             ker_px_shape=pool_size,
-            strides=layer.strides,
+            strides=strides,
             data_format=data_format,
-            padding=layer.padding,
+            padding=padding,
             name=layer.name,
         )
 
         config['pool_width'] = config.pop('filt_width')
         if 'filt_height' in config:
             config['pool_height'] = config.pop('filt_height')
+        if not isinstance(layer, BasePooling) and len(px_in_shape) == 1:
+            config['n_in'] = config['in_width']  # inconsistent global pooling1d config key...
 
         return config
