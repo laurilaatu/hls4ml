@@ -5,7 +5,7 @@ from ._base import KerasV3LayerHandler, register
 
 if typing.TYPE_CHECKING:
     import keras
-    from keras.api import KerasTensor
+    from keras import KerasTensor
 
 
 def strip_batch_dim(equation: str, einsum_dense: bool = True):

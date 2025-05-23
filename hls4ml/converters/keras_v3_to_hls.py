@@ -5,7 +5,7 @@ from typing import Any, Callable, Sequence
 
 if typing.TYPE_CHECKING:
     import keras
-    from keras.api import KerasTensor
+    from keras import KerasTensor
 
 import numpy as np
 

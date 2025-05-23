@@ -5,7 +5,7 @@ from ._base import KerasV3LayerHandler, register
 from .conv import gen_conv_config
 
 if typing.TYPE_CHECKING:
-    from keras.api import KerasTensor
+    from keras import KerasTensor
     from keras.src.layers.pooling.base_global_pooling import BaseGlobalPooling
     from keras.src.layers.pooling.base_pooling import BasePooling
 

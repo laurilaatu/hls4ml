@@ -17,7 +17,7 @@ class DefaultConfig(TypedDict, total=False):
 
 if typing.TYPE_CHECKING:
     import keras
-    from keras.api import KerasTensor
+    from keras import KerasTensor
 
 T_kv3_handler = Callable[
     ['keras.Layer', Sequence['keras.KerasTensor'], Sequence['keras.KerasTensor']], tuple[dict[str, Any], ...]
