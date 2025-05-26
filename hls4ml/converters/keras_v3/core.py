@@ -243,3 +243,17 @@ class KV3ReshapeHandler(KerasV3LayerHandler):
             'class_name': 'Reshape',
             'target_shape': list(out_tensors[0].shape[1:]),
         }
+
+
+@register
+class KV3PermuteHandler(KerasV3LayerHandler):
+    handles = ('keras.src.layers.reshaping.permute.Permute',)
+
+    def handle(
+        self,
+        layer: 'keras.layers.Permute',
+        in_tensors: Sequence['KerasTensor'],
+        out_tensors: Sequence['KerasTensor'],
+    ):
+        config = {'class_name': 'Transpose', 'perm': [dim - 1 for dim in layer.dims]}  # rm batch dim
+        return config

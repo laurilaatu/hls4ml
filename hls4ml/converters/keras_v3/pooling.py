@@ -67,7 +67,8 @@ class KV3PoolingHandler(KerasV3LayerHandler):
         config['pool_width'] = config.pop('filt_width')
         if 'filt_height' in config:
             config['pool_height'] = config.pop('filt_height')
-        if not isinstance(layer, BasePooling) and len(px_in_shape) == 1:
-            config['n_in'] = config['in_width']  # inconsistent global pooling1d config key...
-
+        if len(px_in_shape) == 1:
+            # inconsistent pooling1d config key name...
+            config['n_in'] = config['in_width']
+            config['n_out'] = config['out_width']
         return config
