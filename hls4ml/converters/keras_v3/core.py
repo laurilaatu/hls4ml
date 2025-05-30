@@ -26,7 +26,7 @@ class KV3DenseHandler(KerasV3LayerHandler):
 
         kernel = self.load_weight(layer, 'kernel')
         bias = self.load_weight(layer, 'bias') if layer.use_bias else None
-        n_in, n_out = kernel.shape
+        n_in, n_out = kernel.shape  # type: ignore
 
         config = {
             'data_format': 'channels_last',
@@ -79,7 +79,7 @@ class KV3MergeHandler(KerasV3LayerHandler):
         config: dict[str, Any] = {'output_shape': output_shape}
 
         op = cls_name.lower()
-        match cls_name.lower():
+        match cls_name:
             case 'Concatenate':
                 rank = len(output_shape)
                 class_name = f'Concatenate{rank}d'
@@ -90,7 +90,7 @@ class KV3MergeHandler(KerasV3LayerHandler):
                     f'{in_tensors[0].shape} and {in_tensors[1].shape} for layer {layer.name}.'
                 )
                 assert all(len(t.shape) == 2 for t in in_tensors), msg
-                assert in_tensors[0].shape[1] == in_tensors[1].shape[0], f'Input shape mismatch for layer {layer.name}.'
+                assert in_tensors[0].shape[1] == in_tensors[1].shape[1], f'Input shape mismatch for layer {layer.name}.'
                 class_name = 'Dot'
                 op = 'dot1d'
                 config['axes'] = layer.axes
@@ -256,4 +256,49 @@ class KV3PermuteHandler(KerasV3LayerHandler):
         out_tensors: Sequence['KerasTensor'],
     ):
         config = {'class_name': 'Transpose', 'perm': [dim - 1 for dim in layer.dims]}  # rm batch dim
+        return config
+
+
+@register
+class KV3NoOp(KerasV3LayerHandler):
+    handles = (
+        'keras.src.layers.preprocessing.image_preprocessing.random_brightness.RandomBrightness',
+        'keras.src.layers.preprocessing.image_preprocessing.random_color_degeneration.RandomColorDegeneration',
+        'keras.src.layers.preprocessing.image_preprocessing.random_color_jitter.RandomColorJitter',
+        'keras.src.layers.preprocessing.image_preprocessing.random_contrast.RandomContrast',
+        'keras.src.layers.preprocessing.image_preprocessing.random_crop.RandomCrop',
+        'keras.src.layers.preprocessing.image_preprocessing.random_elastic_transform.RandomElasticTransform',
+        'keras.src.layers.preprocessing.image_preprocessing.random_erasing.RandomErasing',
+        'keras.src.layers.preprocessing.image_preprocessing.random_flip.RandomFlip',
+        'keras.src.layers.preprocessing.image_preprocessing.random_gaussian_blur.RandomGaussianBlur',
+        'keras.src.layers.preprocessing.image_preprocessing.random_grayscale.RandomGrayscale',
+        'keras.src.layers.preprocessing.image_preprocessing.random_hue.RandomHue',
+        'keras.src.layers.preprocessing.image_preprocessing.random_invert.RandomInvert',
+        'keras.src.layers.preprocessing.image_preprocessing.random_perspective.RandomPerspective',
+        'keras.src.layers.preprocessing.image_preprocessing.random_posterization.RandomPosterization',
+        'keras.src.layers.preprocessing.image_preprocessing.random_rotation.RandomRotation',
+        'keras.src.layers.preprocessing.image_preprocessing.random_saturation.RandomSaturation',
+        'keras.src.layers.preprocessing.image_preprocessing.random_sharpness.RandomSharpness',
+        'keras.src.layers.preprocessing.image_preprocessing.random_shear.RandomShear',
+        'keras.src.layers.preprocessing.image_preprocessing.random_translation.RandomTranslation',
+        'keras.src.layers.preprocessing.image_preprocessing.random_zoom.RandomZoom',
+        'keras.src.layers.regularization.alpha_dropout.AlphaDropout',
+        'keras.src.layers.regularization.dropout.Dropout',
+        'keras.src.layers.regularization.gaussian_dropout.GaussianDropout',
+        'keras.src.layers.regularization.spatial_dropout.SpatialDropout1D',
+        'keras.src.layers.regularization.spatial_dropout.SpatialDropout2D',
+        'keras.src.layers.regularization.spatial_dropout.SpatialDropout3D',
+    )
+
+    def handle(
+        self,
+        layer: 'keras.layers.Activation',
+        in_tensors: Sequence['KerasTensor'],
+        out_tensors: Sequence['KerasTensor'],
+    ):
+        config = {
+            'activation': 'linear',
+            'class_name': 'Activation',
+            'n_in': prod(in_tensors[0].shape[1:]),  # type: ignore
+        }
         return config
