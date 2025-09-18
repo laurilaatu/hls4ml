@@ -265,6 +265,45 @@ template <class data_T, class res_T, typename CONFIG_T> inline void softmax(cons
     }
 }
 
+template<class CONFIG_T>
+struct softmax_multidim_slice_config : CONFIG_T {
+    static constexpr unsigned n_in = CONFIG_T::n_slice;
+};
+
+template <class data_T, class res_T, typename CONFIG_T>
+inline void softmax_multidim(const data_T &data, res_T &res) {
+    using buffer_data_T = std::array<typename data_T::value_type, CONFIG_T::n_slice>;
+    using buffer_res_T = std::array<typename res_T::value_type, CONFIG_T::n_slice>;
+
+    OuterLoop:
+    #pragma unroll
+    for (unsigned i = 0; i < CONFIG_T::n_outer; i++) {
+        InnerLoop:
+        #pragma unroll
+        for (unsigned k = 0; k < CONFIG_T::n_inner; k++) {
+            [[intel::fpga_register]] buffer_data_T buffer_in;
+            [[intel::fpga_register]] buffer_res_T buffer_out;
+
+            GatherLoop:
+            #pragma unroll
+            for (unsigned j = 0; j < CONFIG_T::n_slice; j++) {
+                buffer_in[j] = data[i * CONFIG_T::n_slice * CONFIG_T::n_inner + j * CONFIG_T::n_inner + k];
+            }
+
+            // Use the helper struct defined outside the function to create the correct config type
+            using softmax_slice_config = softmax_multidim_slice_config<CONFIG_T>;
+
+            // Call the core softmax with the new, correctly-scoped config
+            nnet::softmax<buffer_data_T, buffer_res_T, softmax_slice_config>(buffer_in, buffer_out);
+
+            ScatterLoop:
+            #pragma unroll
+            for (unsigned j = 0; j < CONFIG_T::n_slice; j++) {
+                res[i * CONFIG_T::n_slice * CONFIG_T::n_inner + j * CONFIG_T::n_inner + k] = buffer_out[j];
+            }
+        }
+    }
+}
 // *************************************************
 //       TanH Activation
 // *************************************************
