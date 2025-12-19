@@ -550,12 +550,12 @@ class OneAPIWriter(Writer):
             dstpath = f'{model.config.get_output_dir()}/src/firmware/{dst}'
             copyfile(srcpath, dstpath)
 
-    def __get_table_size(self, model, activation):
+    def __get_table_size(self, model, activation, table_size_name='table_size'):
         for layer in model.get_layers():
             if (
                 layer.get_attr('activation') == activation or layer.get_attr('recurrent_activation') == activation
-            ) and layer.get_attr('table_size') is not None:
-                return int(layer.get_attr('table_size'))
+            ) and layer.get_attr(table_size_name) is not None:
+                return int(layer.get_attr(table_size_name))
         return 1024
 
     def __get_table_header(self, table_name, table_size):
@@ -688,47 +688,81 @@ class OneAPIWriter(Writer):
         h_file.write('};\n')
         h_file.close()
 
+    def quantize(self, data, width, integer_bits, signed=True):
+        """
+        Simulates hardware quantization (scaling, rounding, saturation).
+        """
+        fractional_bits = width - integer_bits
+        scale_factor = 2.0**fractional_bits
+        
+        if signed:
+            min_val = -2**(width - 1)
+            max_val = 2**(width - 1) - 1
+        else:
+            min_val = 0
+            max_val = 2**width - 1
+            
+        data_scaled = data * scale_factor
+        data_rounded = np.round(data_scaled)
+        data_clipped = np.clip(data_rounded, min_val, max_val)
+        
+        return data_clipped / scale_factor
+
     def __write_exp_table(self, model, path):
+        import math
         table_name = 'exp_table'
-        table_size = self.__get_table_size(model, 'softmax')
+        table_size = self.__get_table_size(model, 'softmax', "exp_table_size")
 
         h_file = open(f'{path}/{table_name}.tb', 'w')
         h_file.write(self.__get_table_header(table_name, table_size))
 
-        # Default fixed point precision
-        # 6 bits for integer part, 10 bits for decimal - total, 16
-        fp_bits = 16
-        fp_integer = 6
-        fp_signed = True
-
-        # Exp table should use the same precision as exp_table, as seen in Vivado code
-        # init_exp_table<data_T, CONFIG_T>(exp_table);
+        # --- 1. Get Input Precision (data_T) ---
+        # This matches the precision of 'd_xi_xmax' in the oneAPI C++ code
+        fp_bits, fp_integer, fp_signed = 16, 6, True # Defaults
         for layer in model.get_layers():
-            if layer.name == 'softmax':
+            if 'softmax' in layer.name:
                 ac_type = layer.get_input_variable().type
                 if ac_type is not None:
-                    try:
-                        fp_bits = ac_type.precision.integer + ac_type.precision.fractional
-                        fp_integer = ac_type.precision.integer
-                        fp_signed = ac_type.precision.signed
-                    except Exception:
-                        # FixedPrecisionType wasn't correctly stored in layer attributes, use default values
-                        pass
-                    if fp_signed is False:
-                        raise Exception('Softmax types need to be signed')
+                    fp_bits = ac_type.precision.width
+                    fp_integer = ac_type.precision.integer
+                    fp_signed = ac_type.precision.signed
+                    break
+
+        # --- 2. Get Output Precision (exp_table_t) ---
+        # This is the precision the final table values are quantized to.
+        out_fp_bits, out_fp_integer, out_fp_signed = 8, 2, False # Defaults
+        for layer in model.get_layers():
+            if 'softmax' in layer.name:
+                ac_type = layer.get_attr('exp_table_t')
+                if ac_type is not None:
+                    out_fp_bits = ac_type.precision.width
+                    out_fp_integer = ac_type.precision.integer
+                    out_fp_signed = ac_type.precision.signed
+                break
 
         sep = ''
         N = ceil_log2(table_size)
+        
         for i in range(table_size):
+            # Create an emulator for the input number 'x'
             f = FixedPointEmulator(fp_bits, fp_integer, signed=fp_signed)
+            
+            # Convert the table index 'i' into its N-bit binary representation
             b = uint_to_binary(i, N)
-            if i == 0:
-                b.insert(0, 0)
-            else:
-                b.insert(0, 1)
+            
+            # Use your set_msb_bits to set the top N bits of the number.
+            # The remaining LSBs will be 0 from initialization.
+            # This perfectly simulates the HLS logic.
             f.set_msb_bits(b)
-            real_val = f.exp_float()
-            h_file.write(sep + str(real_val))
+
+            # Get the float value of 'x' and calculate 'exp(x)'
+            x_val = f.to_float()
+            exp_x_float = math.exp(x_val)
+            
+            # Quantize the result to the table's output precision
+            quantized_val = self.quantize(exp_x_float, out_fp_bits, out_fp_integer, out_fp_signed)
+
+            h_file.write(sep + str(quantized_val))
             sep = ", "
 
         h_file.write('};\n')
@@ -736,42 +770,67 @@ class OneAPIWriter(Writer):
 
     def __write_invert_table(self, model, path):
         table_name = 'invert_table'
-        table_size = self.__get_table_size(model, 'softmax')
-
+        table_size = self.__get_table_size(model, 'softmax', "inv_table_size")
         h_file = open(f'{path}/{table_name}.tb', 'w')
         h_file.write(self.__get_table_header(table_name, table_size))
 
-        # Default fixed point precision, in case values from layer attributes cannot be extracted
-        # 8 bits for integer part, 10 bits for decimal - total, 18
-        fp_bits = 18
-        fp_integer = 8
-        fp_signed = True
-
-        # Invert table should use the same precision as exp_table, as seen in Vivado code
-        # init_invert_table<typename CONFIG_T::exp_table_t, CONFIG_T>(invert_table);
+        # --- 1. Get Input Precision (exp_table_t) ---
+        # This matches the precision of 'exp_sum' in the oneAPI C++ code
+        in_fp_bits, in_fp_integer, in_fp_signed = 8, 2, False # Defaults
         for layer in model.get_layers():
-            if layer.name == 'softmax':
-                ac_type = layer.get_attr('exp_table_t')
+            if 'softmax' in layer.name:
+                ac_type = layer.get_attr('exp_table_t') 
                 if ac_type is not None:
-                    try:
-                        fp_bits = ac_type.precision.integer + ac_type.precision.fractional
-                        fp_integer = ac_type.precision.integer
-                        fp_signed = ac_type.precision.signed
-                    except Exception:
-                        # FixedPrecisionType wasn't correctly stored in layer attributes, use default values
-                        pass
-                    if fp_signed is False:
-                        raise Exception('Softmax types need to be signed')
+                    in_fp_bits = ac_type.precision.width
+                    in_fp_integer = ac_type.precision.integer
+                    in_fp_signed = ac_type.precision.signed
+                break
+
+        # --- 2. Get Output Precision (inv_table_t) ---
+        # This is the precision the final table values are quantized to.
+        out_fp_bits, out_fp_integer, out_fp_signed = 8, 2, False # Defaults
+        for layer in model.get_layers():
+            if 'softmax' in layer.name:
+                ac_type = layer.get_attr('inv_table_t')
+                if ac_type is not None:
+                    out_fp_bits = ac_type.precision.width
+                    out_fp_integer = ac_type.precision.integer
+                    out_fp_signed = ac_type.precision.signed
+                break
 
         sep = ''
         N = ceil_log2(table_size)
+        
         for i in range(table_size):
-            f = FixedPointEmulator(fp_bits, fp_integer, signed=fp_signed)
+            # Create an emulator for the input number 'x'
+            f = FixedPointEmulator(in_fp_bits, in_fp_integer, signed=in_fp_signed)
+            
+            # Convert the table index 'i' into its N-bit binary representation
             b = uint_to_binary(i, N)
-            b.insert(0, 0)
+            
+            # Set the top N bits
             f.set_msb_bits(b)
-            real_val = f.inv_float()
-            h_file.write(sep + str(real_val))
+
+            # Get the float value of 'x'
+            x_val = f.to_float()
+            
+            # Calculate '1/x'
+            inv_x_float = 0.0
+            if x_val != 0:
+                inv_x_float = 1.0 / x_val
+            else:
+                # Replicate hardware saturation on division by zero
+                # Use the table's output precision for this
+                if out_fp_signed:
+                    max_pos_val = (2**(out_fp_bits - 1) - 1) / (2.0**(out_fp_bits - out_fp_integer))
+                else:
+                    max_pos_val = (2**out_fp_bits - 1) / (2.0**(out_fp_bits - out_fp_integer))
+                inv_x_float = max_pos_val
+            
+            # Quantize the result to the table's output precision
+            quantized_val = self.quantize(inv_x_float, out_fp_bits, out_fp_integer, out_fp_signed)
+
+            h_file.write(sep + str(quantized_val))
             sep = ", "
 
         h_file.write('};\n')

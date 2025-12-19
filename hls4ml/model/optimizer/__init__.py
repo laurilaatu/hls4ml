@@ -84,7 +84,6 @@ register_flow(
         'eliminate_linear_activation',
         'merge_linear_activation',
         # many of the above optimzers need to be done before this
-        'infer_precision_types',
     ],
     requires=['parse_qonnx'],
 )  # TODO Maybe not all QKeras optmizers belong here?

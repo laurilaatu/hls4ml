@@ -79,7 +79,6 @@ class OneAPIBackend(FPGABackend):
             'oneapi:inplace_parallel_reshape',
             'oneapi:skip_softmax',
             'oneapi:fix_softmax_table_size',
-            'infer_precision_types',
             'oneapi:process_fixed_point_quantizer_layer',
             'oneapi:validate_ac_types',
         ]
