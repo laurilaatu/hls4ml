@@ -129,8 +129,7 @@ void compute_output_buffer_1d(
     }
 }
 
-template <class data_pipe, class res_pipe, typename CONFIG_T>
-void conv_1d_cl_stream(typename CONFIG_T::weight_t weights, typename CONFIG_T::bias_t biases) {
+template <class data_pipe, class res_pipe, typename CONFIG_T> void conv_1d_cl_stream() {
 
     using data_arr_T = typename ExtractPipeType<data_pipe>::value_type;
     using data_element_T = typename data_arr_T::value_type;
@@ -153,22 +152,22 @@ void conv_1d_cl_stream(typename CONFIG_T::weight_t weights, typename CONFIG_T::b
 // Input image left-side padding
 PaddingLeftWidth:
     for (int col = 0; col < CONFIG_T::pad_left; col++) {
-        compute_output_buffer_1d<data_arr_T, data_window_T, res_pipe, CONFIG_T>(padds, line_buffer, kernel_window, weights,
-                                                                                biases, pX, sX);
+        compute_output_buffer_1d<data_arr_T, data_window_T, res_pipe, CONFIG_T>(padds, line_buffer, kernel_window,
+                                                                                CONFIG_T::weights, CONFIG_T::biases, pX, sX);
     }
 
 // Read input image
 ReadInputWidth:
     for (int col = 0; col < CONFIG_T::in_width; col++) {
-        compute_output_buffer_1d<data_arr_T, data_window_T, res_pipe, CONFIG_T>(data_pipe::read(), line_buffer,
-                                                                                kernel_window, weights, biases, pX, sX);
+        compute_output_buffer_1d<data_arr_T, data_window_T, res_pipe, CONFIG_T>(
+            data_pipe::read(), line_buffer, kernel_window, CONFIG_T::weights, CONFIG_T::biases, pX, sX);
     }
 
 // Input image right-side padding
 PaddingRightWidth:
     for (int col = 0; col < CONFIG_T::pad_right; col++) {
-        compute_output_buffer_1d<data_arr_T, data_window_T, res_pipe, CONFIG_T>(padds, line_buffer, kernel_window, weights,
-                                                                                biases, pX, sX);
+        compute_output_buffer_1d<data_arr_T, data_window_T, res_pipe, CONFIG_T>(padds, line_buffer, kernel_window,
+                                                                                CONFIG_T::weights, CONFIG_T::biases, pX, sX);
     }
 }
 
