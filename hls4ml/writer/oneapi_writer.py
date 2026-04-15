@@ -140,14 +140,6 @@ class OneAPIWriter(Writer):
                             newline += indent + f'auto {inp.name} = {inp.pipe_name}::read();\n'
                     # for streaming we don't need to read it in
 
-                # Insert weights
-                elif '// hls-fpga-machine-learning insert weights' in line:
-                    newline = line
-                    for layer in model.get_layers():
-                        for w in layer.get_weights():
-                            if w not in model_brams:
-                                newline += f'#include "weights/{w.name}.h"\n'
-
                 # Insert task sequences
                 elif '// hls-fpga-machine-learning declare task sequences' in line:
                     newline = line
@@ -235,6 +227,14 @@ class OneAPIWriter(Writer):
                     newline = line
                     for inp in model_inputs:
                         newline += inp.declare_cpp()
+
+                # Insert weights
+                elif '// hls-fpga-machine-learning insert weights' in line:
+                    newline = line
+                    for layer in model.get_layers():
+                        for w in layer.get_weights():
+                            #if w not in model_brams:
+                            newline += f'#include "weights/{w.name}.h"\n'                        
 
                 # and declareations for the outputs
                 elif '// hls-fpga-machine-learning insert outputs' in line:

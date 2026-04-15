@@ -96,12 +96,12 @@ gru_config_template = """struct config{index} : nnet::gru_config {{
     static const bool store_weights_in_bram = false;
 }};\n"""
 
-gru_function_template = 'nnet::gru<{input_t}, {output_t}, {config}>({input}, {output}, {w}, {wr}, {b}, {br});'
+gru_function_template = 'nnet::gru<{input_t}, {output_t}, {config}>({input}, {output});'
 gru_function_initial_state_template = (
-    'nnet::gru_init_state<{input_t}, {h_t}, {output_t}, {config}>({input}, {init_state}, {output}, {w}, {wr}, {b}, {br});'
+    'nnet::gru_init_state<{input_t}, {h_t}, {output_t}, {config}>({input}, {init_state}, {output});'
 )
 gru_task_sequence_template = 'task_sequence<nnet::gru_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
-gru_stream_function_template = '{name}.async({w}, {wr}, {b}, {br});'
+gru_stream_function_template = '{name}.async();'
 
 
 class GRUConfigTemplate(LayerConfigTemplate):

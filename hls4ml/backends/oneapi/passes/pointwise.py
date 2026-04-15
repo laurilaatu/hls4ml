@@ -13,25 +13,25 @@ from hls4ml.model.optimizer import OptimizerPass
 
 """
 Custom hls4ml layer implementation for 1x1 Conv filters using im2col
-Allows lower latency andresource usage, due to less loop invocations
+Allows lower latency and resource usage, due to less loop invocations
 """
 
 pointwise_conv1d_function_template = (
-    'nnet::pointwise_conv_1d_{data_format}<{input_t}, {output_t}, {config}>({input}, {output}, {w}, {b});'
+    'nnet::pointwise_conv_1d_{data_format}<{input_t}, {output_t}, {config}>({input}, {output});'
 )
 pointwise_conv2d_function_template = (
-    'nnet::pointwise_conv_2d_{data_format}<{input_t}, {output_t}, {config}>({input}, {output}, {w}, {b});'
+    'nnet::pointwise_conv_2d_{data_format}<{input_t}, {output_t}, {config}>({input}, {output});'
 )
 
 pointwise_conv1d_task_sequence_template = (
-    'task_sequence<nnet::pintwise_conv_1d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+    'task_sequence<nnet::pointwise_conv_1d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
 )
 
 pointwise_conv2d_task_sequence_template = (
-    'task_sequence<nnet::pintwise_conv_2d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+    'task_sequence<nnet::pointwise_conv_2d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
 )
 
-pointwise_conv_stream_function_template = '{name}.async({w}, {b});'
+pointwise_conv_stream_function_template = '{name}.async();'
 
 sepconv1d_include_list = ['nnet_utils/nnet_conv1d.h']
 sepconv2d_include_list = ['nnet_utils/nnet_conv2d.h']
@@ -54,8 +54,6 @@ class PointwiseConv1DFunctionTemplate(FunctionCallTemplate):
         if node.get_attr('data_format') == 'channels_first':
             raise RuntimeError('channels_first not supported on oneAPI')
         params['data_format'] = 'cl'
-        params['w'] = node.get_weights('weight').name
-        params['b'] = node.get_weights('bias').name
 
         return self.template.format(**params)
 
@@ -90,8 +88,6 @@ class PointwiseConv2DFunctionTemplate(FunctionCallTemplate):
         if node.get_attr('data_format') == 'channels_first':
             raise RuntimeError('channels_first not supported on oneAPI')
         params['data_format'] = 'cl'
-        params['w'] = node.get_weights('weight').name
-        params['b'] = node.get_weights('bias').name
 
         return self.template.format(**params)
 
@@ -115,8 +111,6 @@ class PointwiseConvStreamFunctionTemplate(StreamFunctionCallTemplate):
 
     def format(self, node):
         params = self._default_function_params(node)
-        params['w'] = node.get_weights('weight').name
-        params['b'] = node.get_weights('bias').name
 
         return self.template.format(**params)
 
