@@ -2,6 +2,7 @@ from hls4ml.backends.backend import get_backend
 from hls4ml.backends.template import FunctionCallTemplate, LayerConfigTemplate
 from hls4ml.model.layers import EinsumDense
 from hls4ml.utils.transpose_utils import transpose_config_gen
+from hls4ml.backends.oneapi.oneapi_template import StreamFunctionCallTemplate, TaskSequenceTemplate
 
 from .reshaping_templates import transpose_config_template
 
@@ -46,6 +47,9 @@ struct config{index} {{
     typedef {weight_t.name} weight_t;
     typedef {bias_t.name} bias_t;
 
+    static constexpr bool opt_dense = {opt_dense};
+    static constexpr unsigned n_head = {n_head};
+
     {kernel_config};
 
     // Layer Sizes
@@ -61,10 +65,9 @@ struct config{index} {{
 }};
 """
 
-einsum_dense_function_template = 'nnet::einsum_dense<{input_t}, {output_t}, {config}>({input}, {output}, {w}, {b});'
-einsum_dense_da_function_template = 'nnet::einsum_dense<{input_t}, {output_t}, {config}>({input}, {output}, {b});'
+einsum_dense_function_template = 'nnet::einsum_dense<{input_t}, {output_t}, {config}>({input}, {output}, {b});'
 
-einsum_dense_include_list = ['nnet_utils/nnet_einsum_dense.h', 'nnet_utils/nnet_dense.h']
+einsum_dense_include_list = ['nnet_utils/nnet_einsum_dense_stream.h', 'nnet_utils/nnet_dense.h']
 
 
 class EinsumDenseConfigTemplate(LayerConfigTemplate):
@@ -75,8 +78,16 @@ class EinsumDenseConfigTemplate(LayerConfigTemplate):
 
     def dense_config(self, node: EinsumDense):
         dense_params = self._default_config_params(node)
+        #if 'n_head' in node.attributes and 'opt_dense' in node.attributes:
+        #    dense_params['n_in'] = max(1, node.attributes['n_contract']//node.attributes['n_head'])
+        #else:
         dense_params['n_in'] = node.attributes['n_contract']
+
+        #if 'n_head' in node.attributes and 'opt_dense' not in node.attributes:
+        #    dense_params['n_out'] = max(1, node.attributes['n_free_kernel']//node.attributes['n_head'])
+        #else: 
         dense_params['n_out'] = node.attributes['n_free_kernel']
+
         if node.attributes['n_inplace'] == 1:
             dense_params['nzeros'] = node.get_weights('weight').nzeros  # type: ignore
         else:
@@ -97,7 +108,8 @@ class EinsumDenseConfigTemplate(LayerConfigTemplate):
         strategy = node.attributes['strategy']
         io_type = node.model.config.get_config_value('IOType')
 
-        assert io_type == 'io_parallel', 'EinsumDense layer only supports io_parallel and distributed_arithmetic'
+        #NO NEED THIS SINCE EINSUM CAN NOW BE STREAMED
+        # assert io_type == 'io_parallel', 'EinsumDense layer only supports io_parallel and distributed_arithmetic'
 
         # EinsumDense config
         params = default_params.copy()
@@ -106,6 +118,20 @@ class EinsumDenseConfigTemplate(LayerConfigTemplate):
         params['n_free_kernel'] = node.attributes['n_free_kernel']
         params['n_contract'] = node.attributes['n_contract']
         params['n_inplace'] = node.attributes['n_inplace']
+
+        params['opt_dense'] = 1 if 'opt_dense' in node.attributes else 0
+        params['n_head'] = 1 if 'n_head' not in node.attributes else node.attributes['n_head']
+
+        #if 'n_head' in node.attributes and 'opt_dense' not in node.attributes:
+            #params['n_inplace'] *= node.attributes['n_head']
+            #params['n_free_kernel'] = max(1, params['n_free_kernel']//node.attributes['n_head'])
+
+        #elif 'n_head' in node.attributes and 'opt_dense' in node.attributes:
+            #params['n_inplace'] *= node.attributes['n_head']
+            #params['n_contract'] = max(1, params['n_contract']//node.attributes['n_head'])
+
+        import pdb; pdb.set_trace()
+
         if strategy.lower() == 'latency':
             params['kernel_config'] = f'typedef config{node.index}_dense dense_conf'
         else:
@@ -129,30 +155,42 @@ class EinsumDenseConfigTemplate(LayerConfigTemplate):
 
         einsum_conf = self.template.format(**params)
 
-        # inp/out transpose config
-        inp_shape = node.attributes['inp_shape']
-        out_interpert_shape = node.attributes['out_interpert_shape']
-        inp_tpose_idxs = node.attributes['inp_tpose_idxs']
-        out_tpose_idxs = node.attributes['out_tpose_idxs']
-        tpose_inp_conf_name = f'config{node.index}_tpose_inp'
-        tpose_out_conf_name = f'config{node.index}_tpose_out'
+        #by-pass transpose config since its not used in streamed kernel
+        if 'contract_dim' not in node.attributes:
+            # inp/out transpose config
+            inp_shape = node.attributes['inp_shape']
+            out_interpert_shape = node.attributes['out_interpert_shape']
+            inp_tpose_idxs = node.attributes['inp_tpose_idxs']
+            out_tpose_idxs = node.attributes['out_tpose_idxs']
+            tpose_inp_conf_name = f'config{node.index}_tpose_inp'
+            tpose_out_conf_name = f'config{node.index}_tpose_out'
 
-        conf = transpose_config_gen(tpose_inp_conf_name, inp_shape, inp_tpose_idxs)
-        inp_tpose_conf = transpose_config_template.format(**conf)
-        conf = transpose_config_gen(tpose_out_conf_name, out_interpert_shape, out_tpose_idxs)
-        out_tpose_conf = transpose_config_template.format(**conf)
+            conf = transpose_config_gen(tpose_inp_conf_name, inp_shape, inp_tpose_idxs)
+            inp_tpose_conf = transpose_config_template.format(**conf)
+            conf = transpose_config_gen(tpose_out_conf_name, out_interpert_shape, out_tpose_idxs)
+            out_tpose_conf = transpose_config_template.format(**conf)
 
-        if strategy.lower() == 'distributed_arithmetic':
-            return '\n\n'.join((inp_tpose_conf, out_tpose_conf, einsum_conf))
+            if strategy.lower() == 'distributed_arithmetic':
+                return '\n\n'.join((inp_tpose_conf, out_tpose_conf, einsum_conf))
 
         dense_config = self.dense_config(node)
-        return '\n\n'.join((inp_tpose_conf, out_tpose_conf, dense_config, einsum_conf))
+        if 'contract_dim' not in node.attributes:
+            return '\n\n'.join((inp_tpose_conf, out_tpose_conf, dense_config, einsum_conf))
+        return '\n\n'.join((dense_config, einsum_conf))
 
 
 class EinsumDenseFunctionTemplate(FunctionCallTemplate):
     def __init__(self):
         super().__init__(EinsumDense, include_header=einsum_dense_include_list)
         self.template = einsum_dense_function_template
+    
+    def format_stream(self, node, **params):
+        input_pipe = node.get_input_variable().pipe_name
+        output_pipe = node.get_output_variable().pipe_name
+        config = params['config']
+        w = params['w']
+        b = params['b']
+        return f'task_sequence<nnet::einsum_dense_stream<{input_pipe}, {output_pipe}, {config}>> {node.name};'
 
     def format(self, node):
         params = self._default_function_params(node)
@@ -160,7 +198,42 @@ class EinsumDenseFunctionTemplate(FunctionCallTemplate):
 
         strategy = node.attributes['strategy']
         if strategy == 'distributed_arithmetic':
-            return einsum_dense_da_function_template.format(**params)
+            return einsum_dense_function_template.format(**params)
 
         params['w'] = node.get_weights('weight').name
-        return einsum_dense_function_template.format(**params)
+
+        io_type = node.model.config.get_config_value('IOType')
+
+        if io_type == 'io_stream':
+            return self.format_stream(node, **params)
+        else:
+            return einsum_dense_function_template.format(**params)
+
+
+class EinsumStreamTaskSequenceTemplate(TaskSequenceTemplate):
+    def __init__(self):
+        super().__init__(EinsumDense)
+        self.template = 'task_sequence<nnet::einsum_dense_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+
+    def format(self, node):
+        params = self._default_function_params(node)
+        params['input_pipe'] = node.get_input_variable().pipe_name
+        if node.get_attr('data_format') == 'channels_first':
+            raise RuntimeError('channels_first not supported on oneAPI')
+        params['data_format'] = 'cl'
+
+        return self.template.format(**params)
+
+
+class EinsumDenseStreamFunctionTemplate(StreamFunctionCallTemplate):
+    def __init__(self):
+        super().__init__(EinsumDense)
+        self.template = '{name}.async({w}, {b});'
+    
+    def format(self, node):
+        params = self._default_function_params(node)
+        params['name'] = node.name
+        params['w'] = node.get_weights('weight').name
+        params['b'] = node.get_weights('bias').name
+
+        return self.template.format(**params)
