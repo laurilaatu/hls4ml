@@ -261,9 +261,7 @@ class ActivationConfigTemplate(LayerConfigTemplate):
                     params['inp_norm_t'].precision.signed = True
                     params['inp_norm_t'].name = f'{node.name}_inp_norm_t'
                 else:
-                    params[
-                        'inp_norm_t'
-                    ].name = f'ac_fixed<{width},{iwidth},{"true" if signed else "false"},AC_RND,AC_SAT_SYM>'
+                    params['inp_norm_t'].name = f'ac_fixed<{width},{iwidth},{str(signed).lower()},AC_RND,AC_SAT_SYM>'
 
                 node.set_attr('inp_norm_t', params['inp_norm_t'])
 
@@ -279,10 +277,6 @@ class ActivationConfigTemplate(LayerConfigTemplate):
                 params['inv_inp_t'].precision.width = params['inv_table_t'].precision.width + 1
                 params['inv_inp_t'].precision.integer = params['inv_table_t'].precision.integer + 1
                 params['inv_inp_t'].precision.signed = True
-
-            # io_type = node.model.config.get_config_value('IOType')
-            # if io_type == 'io_stream':
-            #    params['n_in'] = max(1, params['n_in']//params['context_len'])
 
             if params['implementation'] == 'stable':
                 self.template += softmax_config_table_template_stable
