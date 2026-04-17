@@ -37,14 +37,14 @@ class QMultiHeadAttentionHandler(QLayerHandler):
             f'Critical error handling layer {layer.name}'
         )
         node = layer._inbound_nodes[node_index]
-        '''import pdb;pdb.set_trace()
+        """import pdb;pdb.set_trace()
         causal_params = {}
         if np.prod(tensor_q.shape[1:-1]) > 1:
             context_len = np.prod(tensor_q.shape[1:-1])
             embedding_size = tensor_q.shape[-1]
             n_inplace = layer.num_heads
             data_T = layer.get_input_variable(layer.input[0])
-            causal_params['bram_size'] = context_len * embedding_size'''
+            causal_params['bram_size'] = context_len * embedding_size"""
 
         args = node.arguments.args
         kwargs = node.arguments.kwargs
@@ -129,21 +129,19 @@ class QMultiHeadAttentionHandler(QLayerHandler):
             *config_einsum_sV,
             *config_to_O,
         )
-        
+
         for conf in configs:
-            if f"{layer.name}_QK" in conf['name']:
+            if f'{layer.name}_QK' in conf['name']:
                 conf['contract_dim'] = 'embedding'
-            elif f"{layer.name}_aV" in conf['name']:
+            elif f'{layer.name}_aV' in conf['name']:
                 conf['contract_dim'] = 'context'
             conf['context_len'] = np.prod(tensor_q.shape[1:-1])
-            conf['name'] = f'{layer.name}_{conf["name"]}' #if layer.name not in conf["name"] else conf["name"]
+            conf['name'] = f'{layer.name}_{conf["name"]}'  # if layer.name not in conf["name"] else conf["name"]
             conf['n_head'] = n_head
 
             if 'output' in conf['name']:
                 conf['opt_dense'] = True
-            
 
-        import pdb; pdb.set_trace()
         return configs
 
 
