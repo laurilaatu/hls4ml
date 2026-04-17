@@ -15,3 +15,11 @@ hls4mlprj_*
 *~
 *.ipynb_checkpoints/
 *.bak
+hls4ml/templates/oneapi/firmware/nnet_utils/*_original.h
+hls4ml/templates/oneapi/firmware/nnet_utils/*_BACKUP*.h
+hls4ml/templates/oneapi/firmware/nnet_utils/*_WORKING.h
+hls4ml/templates/oneapi/firmware/nnet_utils/*_working*.h
+hls4ml/templates/oneapi/firmware/nnet_utils/nnet_streamed_attention.h
+hls4ml/templates/oneapi/firmware/nnet_utils/nnet_einsum_streamed.h
+hls4ml/converters/keras_v3/hgq2/multi_head_attention_original.py
+hls4ml/writer/oneapi_writer_orig.py

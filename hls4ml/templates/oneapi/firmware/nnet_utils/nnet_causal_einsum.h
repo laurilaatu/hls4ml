@@ -253,6 +253,10 @@ template <class data0_pipe, class data1_pipe, class res_pipe, typename CONFIG_T>
     }
 
     // CLEAN BRAMS AFTER ITERATIONS END
+    for(unsigned i = 0; i < I; i++){
+        ctx_cts[i] = 0;
+        write_ptrs[i] = 0;
+    }
 }
 
 } // namespace nnet
