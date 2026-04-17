@@ -233,8 +233,8 @@ class OneAPIWriter(Writer):
                     newline = line
                     for layer in model.get_layers():
                         for w in layer.get_weights():
-                            #if w not in model_brams:
-                            newline += f'#include "weights/{w.name}.h"\n'                        
+                            # if w not in model_brams:
+                            newline += f'#include "weights/{w.name}.h"\n'
 
                 # and declareations for the outputs
                 elif '// hls-fpga-machine-learning insert outputs' in line:
@@ -265,6 +265,7 @@ class OneAPIWriter(Writer):
                     all_precision = OrderedDict()
                     for layer in model.get_layers():
                         layer_precision = layer.get_layer_precision()
+                        # import pdb; pdb.set_trace()
                         for type_name, type_var in layer_precision.items():
                             # Ensure that layer's types doesn't override existing types
                             # This can happen in case of InplaceVariable types
@@ -703,28 +704,27 @@ class OneAPIWriter(Writer):
 
         return None  # fp_bits, fp_integer, fp_signed
 
-
     def __write_exp_table(self, model, path):
 
         for layer in model.get_layers():
-            
             if 'softmax' in layer.name:
-                
                 table_name = layer.name + '_exp_table'
-                table_size = int(layer.get_attr('exp_table_size'))//2 if (
-                    layer.get_attr('activation') == 'softmax' or layer.get_attr('recurrent_activation') == 'softmax'
-                    ) and layer.get_attr('exp_table_size') is not None else 1024
+                table_size = (
+                    int(layer.get_attr('exp_table_size')) // 2
+                    if (layer.get_attr('activation') == 'softmax' or layer.get_attr('recurrent_activation') == 'softmax')
+                    and layer.get_attr('exp_table_size') is not None
+                    else 1024
+                )
 
                 with open(f'{path}/{table_name}.h', 'w') as h_file:
-
                     header_name = table_name
                     h_file.write(f'#ifndef {header_name.upper()}_H_\n')
                     h_file.write(f'#define {header_name.upper()}_H_\n\n')
 
                     h_file.write(f'static constexpr {table_name}_t {table_name}[{table_size}] = {{')
-                    
+
                     ac_type = layer.get_attr('inp_norm_t')
-                    
+
                     if ac_type is not None:
                         try:
                             fp_bits = ac_type.precision.integer + ac_type.precision.fractional
@@ -738,7 +738,7 @@ class OneAPIWriter(Writer):
 
                         if fp_signed is False:
                             raise Exception('Softmax types need to be signed')
-                    
+
                     else:
                         fp_bits = 16
                         fp_integer = 6
@@ -757,22 +757,22 @@ class OneAPIWriter(Writer):
                         real_val = f.exp_float()
                         h_file.write(sep + str(real_val))
                         sep = ', '
-                    
+
                     h_file.write('};\n\n')
                     h_file.write('#endif')
-
 
     def __write_invert_table(self, model, path):
         for layer in model.get_layers():
             if 'softmax' in layer.name:
-
                 table_name = layer.name + '_inv_table'
-                table_size = int(layer.get_attr('inv_table_size')) //2 if (
-                    layer.get_attr('activation') == 'softmax' or layer.get_attr('recurrent_activation') == 'softmax'
-                    ) and layer.get_attr('inv_table_size') is not None else 1024
-                
-                with open(f'{path}/{table_name}.h', 'w') as h_file:
+                table_size = (
+                    int(layer.get_attr('inv_table_size')) // 2
+                    if (layer.get_attr('activation') == 'softmax' or layer.get_attr('recurrent_activation') == 'softmax')
+                    and layer.get_attr('inv_table_size') is not None
+                    else 1024
+                )
 
+                with open(f'{path}/{table_name}.h', 'w') as h_file:
                     header_name = table_name
                     h_file.write(f'#ifndef {header_name.upper()}_H_\n')
                     h_file.write(f'#define {header_name.upper()}_H_\n\n')
@@ -813,7 +813,6 @@ class OneAPIWriter(Writer):
 
                     h_file.write('};\n\n')
                     h_file.write('#endif')
-
 
     def __write_exp_table_latency(self, model, path):
         table_name = 'exp_table_latency'
@@ -1033,6 +1032,3 @@ class OneAPIWriter(Writer):
         self.write_generated_code(model)
         self.write_yml(model)
         self.write_tar(model)
-
-
-

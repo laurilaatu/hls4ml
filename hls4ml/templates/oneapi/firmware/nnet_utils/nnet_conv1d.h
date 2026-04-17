@@ -43,13 +43,11 @@ struct conv1d_config {
     typedef float accum_t;
 };
 
-template <class data_T, class res_T, typename CONFIG_T>
-void conv_1d_cl(const data_T &data, res_T &res) {
+template <class data_T, class res_T, typename CONFIG_T> void conv_1d_cl(const data_T &data, res_T &res) {
     conv_1d_resource_cl<data_T, res_T, CONFIG_T>(data, res, CONFIG_T::weights, CONFIG_T::biases);
 }
 
-template <class data_T, class res_T, typename CONFIG_T>
-void pointwise_conv_1d_cl(const data_T &data, res_T &res) {
+template <class data_T, class res_T, typename CONFIG_T> void pointwise_conv_1d_cl(const data_T &data, res_T &res) {
     assert(CONFIG_T::filt_width == 1);
     pointwise_conv_1d_resource_cl<data_T, res_T, CONFIG_T>(data, res, CONFIG_T::weights, CONFIG_T::biases);
 }
