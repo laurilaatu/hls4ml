@@ -74,8 +74,11 @@ class EinsumConfigTemplate(LayerConfigTemplate):
         params['sqrt_dk'] = 1
         params['inp0_t'] = 'unsigned'
 
+        io_type = node.model.config.get_config_value('IOType')
+        streamed = io_type == 'io_stream'
+
         # This means we are about to do an attention calculation - additional configs required for causal einsum
-        if 'contract_dim' in node.attributes:
+        if ('contract_dim' in node.attributes) and streamed:
             context_len = node.attributes['context_len']
             if node.attributes['contract_dim'] == 'embedding':
                 params['n_free0'] = max(1, params['n_free0'] // context_len)
@@ -88,7 +91,7 @@ class EinsumConfigTemplate(LayerConfigTemplate):
                 params['n_contract'] = max(1, params['n_contract'] // context_len)
             # params['n_inplace'] = 1
 
-        elif node.model.config.get_config_value('HLSConfig')['context_len'] is not None:
+        elif (node.model.config.get_config_value('HLSConfig')['context_len'] is not None) and streamed:
             context_len = node.model.config.get_config_value('HLSConfig')['context_len']
             params['n_free0'] = max(1, params['n_free0'] // context_len)
             if 'contract_dim' in node.attributes and node.attributes['contract_dim'] == 'context':
@@ -105,13 +108,13 @@ class EinsumConfigTemplate(LayerConfigTemplate):
         total_mults = params['n_free0'] * params['n_free1'] * params['n_contract'] * params['n_inplace']
         params['multiplier_limit'] = ceil(total_mults / params['reuse_factor'])
 
-        if node.model.config.get_config_value('HLSConfig')['context_len'] is not None:
+        if (node.model.config.get_config_value('HLSConfig')['context_len'] is not None) and streamed:
             params['n_ctx'] = node.model.config.get_config_value('HLSConfig')['context_len']
         else:
-            params['n_ctx'] = node.attributes['context_len'] if 'context_len' in node.attributes else 1
+            params['n_ctx'] = node.attributes['context_len'] if (('context_len' in node.attributes) and streamed) else 1
 
         params['contract_dim'] = (
-            1 if ('contract_dim' in node.attributes and node.attributes['contract_dim'] == 'context') else 0
+            1 if ('contract_dim' in node.attributes and node.attributes['contract_dim'] == 'context' and streamed) else 0
         )
 
         einsum_conf = self.template.format(**params)
