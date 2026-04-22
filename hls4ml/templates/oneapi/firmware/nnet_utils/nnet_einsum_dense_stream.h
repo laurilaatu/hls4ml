@@ -47,8 +47,7 @@ template <class Dense_in_T, class data_pipe, typename CONFIG_T> void read_token(
 }
 
 // todo stream weights and biases too in the future?
-template <class data_pipe, class res_pipe, typename CONFIG_T>
-void einsum_dense_stream(typename CONFIG_T::weight_t weights, typename CONFIG_T::bias_t biases) {
+template <class data_pipe, class res_pipe, typename CONFIG_T> void einsum_dense_stream() {
 
     constexpr unsigned L0 = CONFIG_T::n_free_data;
     constexpr unsigned L1 = CONFIG_T::n_free_kernel;
@@ -97,14 +96,14 @@ void einsum_dense_stream(typename CONFIG_T::weight_t weights, typename CONFIG_T:
             for (unsigned j = 0; j < L1; j++) {
                 #pragma unroll
                 for (unsigned k = 0; k < C; k++) {
-                    dense_weights[j * C + k] = weights[weights_offset + (k * L1 + j)];
+                    dense_weights[j * C + k] = CONFIG_T::weights[weights_offset + (k * L1 + j)];
                 }
             }
 
             const unsigned bias_offset = i * L0 * L1;
             #pragma unroll
             for (unsigned b_idx = 0; b_idx < L1; b_idx++) {
-                dense_biases[b_idx] = biases[bias_offset + L1 * l0 + b_idx];
+                dense_biases[b_idx] = CONFIG_T::biases[bias_offset + L1 * l0 + b_idx];
             }
 
             // Create a temporary config to ensure the types of the local buffers
