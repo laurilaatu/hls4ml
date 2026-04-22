@@ -80,7 +80,6 @@ einsum_dense_stream_function_template = (
     'task_sequence<nnet::einsum_dense_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
 )
 
-# einsum_dense_stream_function_template_async = '{name}.async({w}, {b});'
 einsum_dense_stream_function_template_async = '{name}.async();'
 
 einsum_dense_include_list = ['nnet_utils/nnet_einsum_dense_stream.h', 'nnet_utils/nnet_dense.h']
