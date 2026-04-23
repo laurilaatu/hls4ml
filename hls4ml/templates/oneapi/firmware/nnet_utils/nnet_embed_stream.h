@@ -19,7 +19,7 @@ InputSequence:
     DenseEmbedding:
         #pragma unroll
         for (int i = 0; i < CONFIG_T::n_out; i++) {
-            res_pack[i] = embeddings[in_data[j] * CONFIG_T::n_out + i];
+            res_pack[i] = embeddings[(in_data[j] * CONFIG_T::n_out + i).to_uint()];
         }
 
         res_pipe::write(res_pack);
