@@ -4,7 +4,7 @@
 namespace nnet {
 
 template <class data_pipe, class res_pipe, typename CONFIG_T>
-void embedding_stream(typename CONFIG_T::embeddings_t embeddings) {
+void embedding_stream() {
 
     using res_T = typename ExtractPipeType<res_pipe>::value_type;
     constexpr auto datasize = std::tuple_size<typename ExtractPipeType<data_pipe>::value_type>{};
@@ -19,7 +19,7 @@ InputSequence:
     DenseEmbedding:
         #pragma unroll
         for (int i = 0; i < CONFIG_T::n_out; i++) {
-            res_pack[i] = embeddings[(in_data[j] * CONFIG_T::n_out + i).to_uint()];
+            res_pack[i] = CONFIG_T::embeddings[(in_data[j] * CONFIG_T::n_out + i).to_uint()];
         }
 
         res_pipe::write(res_pack);
