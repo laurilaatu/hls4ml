@@ -279,9 +279,9 @@ class ActivationConfigTemplate(LayerConfigTemplate):
                 params['inv_inp_t'].precision.signed = True
 
             if params['implementation'] == 'stable':
-                self.template += softmax_config_table_template_stable
+                self.template = softmax_config_template + softmax_config_table_template_stable
             else:
-                self.template += softmax_config_table_template
+                self.template = softmax_config_template + softmax_config_table_template
 
             params['exp_table_name'] = node.name + '_exp_table'
             params['inv_table_name'] = node.name + '_inv_table'
