@@ -103,8 +103,8 @@ class EinsumConfigTemplate(LayerConfigTemplate):
                 else:
                     params['n_contract'] = max(1, params['n_contract'] // context_len)
 
-            elif node.model.config.get_config_value('HLSConfig')['context_len'] is not None:
-                context_len = node.model.config.get_config_value('HLSConfig')['context_len']
+            elif node.model.config.get_config_value('HLSConfig')['ContextLength'] is not None:
+                context_len = node.model.config.get_config_value('HLSConfig')['ContextLength']
                 params['n_ctx'] = context_len
 
                 params['n_free0'] = max(1, params['n_free0'] // context_len)
@@ -122,16 +122,21 @@ class EinsumConfigTemplate(LayerConfigTemplate):
         total_mults = params['n_free0'] * params['n_free1'] * params['n_contract'] * params['n_inplace']
         params['multiplier_limit'] = ceil(total_mults / params['reuse_factor'])
 
+        config_ctx = node.model.config.get_config_value('HLSConfig')['ContextLength']
+
         params['n_ctx'] = (
             node.attributes['context_len']
             if (('n_ctx' not in params) and ('context_len' in node.attributes) and streamed)
+            else config_ctx
+            if config_ctx is not None
             else 1
         )
+
         params['contract_dim'] = (
             1 if ('contract_dim' in node.attributes and node.attributes['contract_dim'] == 'context' and streamed) else 0
         )
 
-        # by-pass transpose for causal_einsum
+        # by-pass transpose for causal einsum
         if not streamed and ('contract_dim' in node.attributes):
             self.template = einsum_transpose_config_header + einsum_config_template
             # inp/out transpose config

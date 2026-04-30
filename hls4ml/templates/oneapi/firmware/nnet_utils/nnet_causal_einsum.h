@@ -62,7 +62,9 @@ template <typename data_T, typename CONFIG_T> struct CausalState {
     };
 };
 
-template <typename data_T, typename CONFIG_T> device_global<typename CausalState<data_T, CONFIG_T>::State> causal_state;
+template <typename data_T, typename CONFIG_T>
+device_global<typename CausalState<data_T, CONFIG_T>::State, decltype(properties(device_image_scope, host_access_none))>
+    causal_state;
 
 // reads a contraction length unit from stream used for datas of dimension > 2
 // only works with per-I streamed data though, careful about what you stream
