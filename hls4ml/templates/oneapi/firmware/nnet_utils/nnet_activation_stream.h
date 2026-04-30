@@ -286,7 +286,7 @@ SoftmaxArrayLoop:
         auto in_pack = data_pipe::read();
 
     SoftmaxArrayPackLoop:
-        #pragma unroll
+        //#pragma unroll
         for (unsigned j = 0; j < input_arr_size; j++) {
             data_array[j] = in_pack[j];
         }
@@ -305,7 +305,7 @@ SoftmaxArrayLoop:
         // Calculate all the e^x's
         [[intel::fpga_register]] typename CONFIG_T::exp_table_t exp_res[input_arr_size];
 
-        #pragma unroll
+        //#pragma unroll
         for (unsigned j = 0; j < input_arr_size; j++) {
             exp_res[j] = CONFIG_T::exp_table[softmax_stable_idx_from_real_val<typename CONFIG_T::inp_norm_t,
                                                                               CONFIG_T::exp_table_size>(d_xi_xmax[j])];
@@ -324,7 +324,7 @@ SoftmaxArrayLoop:
         typename ExtractPipeType<res_pipe>::value_type out_pack;
 
     SoftmaxInvPackLoop:
-        #pragma unroll
+        //#pragma unroll
         for (unsigned j = 0; j < std::tuple_size<typename ExtractPipeType<res_pipe>::value_type>{}; j++) {
 
             // TODO - Find Quartus-equivalent pragma

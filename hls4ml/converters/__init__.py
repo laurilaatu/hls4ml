@@ -155,6 +155,9 @@ def _check_hls_config(config, hls_config):
     if 'SkipOptimizers' in hls_config:
         config['HLSConfig']['SkipOptimizers'] = hls_config['SkipOptimizers']
 
+    if 'ContextLength' in hls_config:
+        config['HLSConfig']['ContextLength'] = hls_config['ContextLength']
+
     return
 
 
@@ -236,8 +239,8 @@ def convert_from_keras_model(
     model_config = hls_config.get('Model', None)
     config['HLSConfig']['Model'] = _check_model_config(model_config)
     config['HLSConfig']['Model']['BitExact'] = bit_exact
-    context_len = hls_config.get('context_len', None)
-    config['HLSConfig']['context_len'] = context_len
+    context_len = hls_config.get('ContextLength', None)
+    config['HLSConfig']['ContextLength'] = context_len
 
     _check_hls_config(config, hls_config)
     if 'KerasModel' in config:
