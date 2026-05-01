@@ -390,20 +390,25 @@ class OneAPIWriter(Writer):
                         newline += f'#include "firmware/weights/{bram.name}.h"\n'
                 elif '// hls-fpga-machine-learning insert zero' in line:
                     newline = line
-                    inp = model_inputs[0]
-                    newline += indent + f'float vals[{inp.size_cpp()}]; \n'
-                    newline += indent + f'for (int j = 0 ; j < {inp.size_cpp()} ; j++) {{\n'
-                    newline += indent + '    vals[j] = 0.0; \n'
-                    newline += indent + '}\n'
-                    newline += indent + f'nnet::convert_data<float, {inp.pipe_name}, {inp.size_cpp()}>(q, vals);\n'
+                    for inp in model_inputs:
+                        newline += indent + f'float {inp.name}_vals[{inp.size_cpp()}]; \n'
+                        newline += indent + f'for (int j = 0 ; j < {inp.size_cpp()} ; j++) {{\n'
+                        newline += indent + f'    {inp.name}_vals[j] = 0.0; \n'
+                        newline += indent + '}\n'
+                        newline += (
+                            indent + f'nnet::convert_data<float, {inp.pipe_name}, {inp.size_cpp()}>(q, {inp.name}_vals);\n'
+                        )
+
                 elif '// hls-fpga-machine-learning insert data' in line:
                     newline = line
-                    inp = model_inputs[0]
-                    newline += indent + f'float vals[{inp.size_cpp()}]; \n'
-                    newline += indent + f'for (int j = 0 ; j < {inp.size_cpp()} ; j++) {{\n'
-                    newline += indent + '    vals[j] = in[j]; \n'
-                    newline += indent + '}\n'
-                    newline += indent + f'nnet::convert_data<float, {inp.pipe_name}, {inp.size_cpp()}>(q, vals);\n'
+                    for inp in model_inputs:
+                        newline += indent + f'float {inp.name}_vals[{inp.size_cpp()}]; \n'
+                        newline += indent + f'for (int j = 0 ; j < {inp.size_cpp()} ; j++) {{\n'
+                        newline += indent + f'    {inp.name}_vals[j] = in[j]; \n'
+                        newline += indent + '}\n'
+                        newline += (
+                            indent + f'nnet::convert_data<float, {inp.pipe_name}, {inp.size_cpp()}>(q, {inp.name}_vals);\n'
+                        )
                 elif '// hls-fpga-machine-learning convert output' in line:
                     newline = line
                     out = model_outputs[0]
