@@ -305,7 +305,7 @@ SoftmaxArrayLoop:
         // Calculate all the e^x's
         [[intel::fpga_register]] typename CONFIG_T::exp_table_t exp_res[input_arr_size];
 
-        #pragma unroll
+        //#pragma unroll
         for (unsigned j = 0; j < input_arr_size; j++) {
             exp_res[j] = CONFIG_T::exp_table[softmax_stable_idx_from_real_val<typename CONFIG_T::inp_norm_t,
                                                                               CONFIG_T::exp_table_size>(d_xi_xmax[j])];

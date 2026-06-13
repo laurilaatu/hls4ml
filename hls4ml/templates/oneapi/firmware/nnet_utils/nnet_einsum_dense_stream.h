@@ -40,7 +40,7 @@ template <class Dense_in_T, class data_pipe, typename CONFIG_T> void read_token(
     // constexpr unsigned I = CONFIG_T::n_inplace;
 
     data_buff_T buff = data_pipe::read();
-    #pragma unroll
+    #pragma unroll 4
     for (unsigned c = 0; c < C; c++) {
         token_buffer[c] = buff[c];
     }
@@ -74,7 +74,7 @@ template <class data_pipe, class res_pipe, typename CONFIG_T> void einsum_dense_
     //#pragma unroll CONFIG_T::parallelization_factor
     for (unsigned l0 = 0; l0 < L0; l0++) {
 
-        #pragma unroll
+        #pragma unroll 4
         for (unsigned i = 0; i < I; i++) {
 
             if (!CONFIG_T::opt_dense)
@@ -92,16 +92,16 @@ template <class data_pipe, class res_pipe, typename CONFIG_T> void einsum_dense_
 
             // Reorder weights from column-major (source) to row-major (destination) during copy
             const unsigned weights_offset = i * L1 * C;
-            #pragma unroll
+            //#pragma unroll 4
             for (unsigned j = 0; j < L1; j++) {
-                #pragma unroll
+                //#pragma unroll 4
                 for (unsigned k = 0; k < C; k++) {
                     dense_weights[j * C + k] = CONFIG_T::weights[weights_offset + (k * L1 + j)];
                 }
             }
 
             const unsigned bias_offset = i * L0 * L1;
-            #pragma unroll
+            //#pragma unroll
             for (unsigned b_idx = 0; b_idx < L1; b_idx++) {
                 dense_biases[b_idx] = CONFIG_T::biases[bias_offset + L1 * l0 + b_idx];
             }

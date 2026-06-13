@@ -190,7 +190,7 @@ template <class data0_pipe, class data1_pipe, class res_pipe, typename CONFIG_T>
 
     for (unsigned loop = 0; loop < CTX; loop++) {
         // COMBINE THIS WITH TILED APPROACH FOR A SPEEDUP
-        #pragma unroll
+        #pragma unroll 4
         for (unsigned i = 0; i < I; i++) {
 
             if constexpr (!CONFIG_T::contract_dim) { // CONTRACT ALONG THE C DIMENSION
@@ -210,11 +210,11 @@ template <class data0_pipe, class data1_pipe, class res_pipe, typename CONFIG_T>
                         const unsigned ctx_buff_offset = L1 * ctx;
 
                         if (ctx < ctx_cts[i]) {
-                            #pragma unroll
+                            #pragma unroll 4
                             for (unsigned l1 = 0; l1 < L1; l1++) {
                                 accum_T tmp = 0;
 
-                                #pragma unroll
+                                #pragma unroll 4
                                 for (unsigned c = 0; c < C; c++) {
                                     tmp += data_vect_buffer[c] * causal_buff[ctx_offset + C * L1 * i + C * l1 + c];
                                 }
@@ -239,7 +239,7 @@ template <class data0_pipe, class data1_pipe, class res_pipe, typename CONFIG_T>
                 read_causal_pipe<data1_T, data1_pipe, CONFIG_T>(i, write_ptrs, ctx_cts, causal_buff);
                 unsigned offset_ctx = (ctx_cts[i] == CTX) ? write_ptrs[i] : 0;
 
-                #pragma unroll
+                #pragma unroll 4
                 for (unsigned l1 = 0; l1 < L1; l1++) {
                     accum_T tmp = 0;
 

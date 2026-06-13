@@ -26,7 +26,7 @@ BatchNormLoop:
         typename ExtractPipeType<res_pipe>::value_type out_data;
 
     BatchNormpack:
-        #pragma unroll
+        #pragma unroll 4
         for (int j = 0; j < datasize; j++) {
             int norm_index;
             if (CONFIG_T::n_filt == -1)
