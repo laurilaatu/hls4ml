@@ -9,12 +9,6 @@
 // actual kernels that are deployed in hardware.
 
 namespace nnet {
-
-struct test_DMA {
-    unsigned sop_num;
-    unsigned eop_num;
-    unsigned writect;
-};
 //////////////////////////////////////////////////////////////////////////////
 // These are the simple, testbench and bridge versions for the HLS flow
 //////////////////////////////////////////////////////////////////////////////
@@ -118,6 +112,53 @@ template <class tkn_src_T, class pos_src_T, class tkn_dest_pipe, class pos_dest_
                 pos_packet[j] = pos_src_ptr[i * dstTypeSize + j];
             }
             pos_dest_pipe::write(pos_packet);
+        }
+    }
+};
+
+//Single data input version 
+template <class src_T, class dest_pipe> struct DMA_convert_data {
+#if !defined(IS_BSP)
+    // When targeting a device family, we instantiate an Avalon Memory Mapped Host for
+    // data transaction between host and the DMA kernel during emulation and simulation.
+    sycl::ext::oneapi::experimental::annotated_arg<
+        src_T *,
+        decltype(sycl::ext::oneapi::experimental::properties{
+            sycl::ext::altera::experimental::latency<0>, sycl::ext::altera::experimental::dwidth<16>,
+            sycl::ext::altera::experimental::buffer_location<kInputBufferLocation>,
+            sycl::ext::altera::experimental::read_write_mode_read, sycl::ext::altera::experimental::wait_request_requested})>
+#else
+    // When targeting oneAPI BSP, we can use USM pointer to access host memory.
+    src_T *const
+#endif
+        src;
+
+    size_t num_iteration;
+
+    [[intel::kernel_args_restrict]] void operator()() const {
+
+#if defined(IS_BSP)
+        // Access data using host pointer.
+        sycl::ext::altera::host_ptr<src_T> src_ptr(src);
+#else
+        // Host allocation is not supported when targeting an FPGA family or part number.
+        src_T *src_ptr(src);
+#endif
+        // First, extract the PipeDataT from the pipe
+        using PipeDataType = typename nnet::ExtractPipeType<dest_pipe>::value_type;
+        // By definition, both must have the same size
+	    constexpr auto dstTypeSize = std::tuple_size<TokenPipeDataType>{};
+
+        [[intel::fpga_register]] PipeDataType packet;
+
+        // Keep sending data to the input layer and keep the kernels running.
+        for (size_t i = 0; i < num_iteration; i++) {
+            
+	        #pragma unroll
+            for (size_t j = 0; j < dstTypeSize; j++) {
+                packet[j] = src_ptr[i * dstTypeSize + j];
+            }
+            dest_pipe::write(packet);
         }
     }
 };

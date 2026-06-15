@@ -1,7 +1,7 @@
 # Direct CMake to use icpx rather than the default C++ compiler/linker on Linux
 # and icx-cl on Windows
 if(UNIX)
-    set(CMAKE_CXX_COMPILER icpx)
+    set(CMAKE_CXX_COMPILER ahls)
 else() # Windows
     include (CMakeForceCompiler)
     CMAKE_FORCE_CXX_COMPILER (icx-cl IntelDPCPP)
@@ -44,9 +44,10 @@ endif()
 # Use cmake -DUSER_FPGA_FLAGS=<flags> to set extra flags for FPGA backend
 # compilation.
 set(USER_FPGA_FLAGS -Wno-unused-label;${USER_FPGA_FLAGS})
+set(USER_FPGA_FLAGS -Xsno-env-check; ${USER_FPGA_FLAGS})
 
 # Use cmake -DUSER_FLAGS=<flags> to set extra flags for general compilation.
-set(USER_FLAGS -Wno-unused-label -fconstexpr-steps=134217728 ${USER_FLAGS})
+set(USER_FLAGS -pthread -Wno-unused-label -fconstexpr-steps=134217728 ${USER_FLAGS})
 
 # Use cmake -DUSER_INCLUDE_PATHS=<paths> to set extra paths for general
 # compilation.

@@ -19,7 +19,7 @@ void embedding_stream() {
         	res_T res_pack;
 
    	 DenseEmbedding2:
-        	#pragma unroll 4
+        	#pragma unroll 4 // TODO: Introduce a config parameter
         	for (int i = 0; i < CONFIG_T::n_out; i++) {
            	 	res_pack[i] = CONFIG_T::embeddings[(in_data[0] * CONFIG_T::n_out + i).to_uint()];
        	 	}	
@@ -38,7 +38,7 @@ void embedding_stream() {
 	        res_T res_pack;
 	
     	DenseEmbedding:
-        	#pragma unroll 4
+        	#pragma unroll 4 // TODO: Introduce a config parameter
         	for (int i = 0; i < CONFIG_T::n_out; i++) {
            	 res_pack[i] = CONFIG_T::embeddings[(in_data[j] * CONFIG_T::n_out + i).to_uint()];
         	}

@@ -282,7 +282,8 @@ template <class data_pipe, class res_pipe, typename CONFIG_T> void softmax_stabl
     [[intel::fpga_register]] input_t data_array[input_arr_size];
 
 SoftmaxArrayLoop:
-    [[intel::initiation_interval(pipeline)]] for (unsigned i = 0; i < CONFIG_T::n_in / input_arr_size; i++) {
+    //[[intel::initiation_interval(pipeline)]] 
+    for (unsigned i = 0; i < CONFIG_T::n_in / input_arr_size; i++) {
         auto in_pack = data_pipe::read();
 
     SoftmaxArrayPackLoop:
@@ -305,11 +306,21 @@ SoftmaxArrayLoop:
         // Calculate all the e^x's
         [[intel::fpga_register]] typename CONFIG_T::exp_table_t exp_res[input_arr_size];
 
-        //#pragma unroll
-        for (unsigned j = 0; j < input_arr_size; j++) {
-            exp_res[j] = CONFIG_T::exp_table[softmax_stable_idx_from_real_val<typename CONFIG_T::inp_norm_t,
-                                                                              CONFIG_T::exp_table_size>(d_xi_xmax[j])];
+        
+        if constexpr (CONFIG_T::exp_table_size < 1024){ // TODO: set a custom limit, not a hard-coded one
+            #pragma unroll
+            for (unsigned j = 0; j < input_arr_size; j++) {
+                exp_res[j] = CONFIG_T::exp_table[softmax_stable_idx_from_real_val<typename CONFIG_T::inp_norm_t,
+                                                                                CONFIG_T::exp_table_size>(d_xi_xmax[j])];
+            }
         }
+        else{
+            for (unsigned j = 0; j < input_arr_size; j++) {
+                exp_res[j] = CONFIG_T::exp_table[softmax_stable_idx_from_real_val<typename CONFIG_T::inp_norm_t,
+                                                                                CONFIG_T::exp_table_size>(d_xi_xmax[j])];
+            }
+        }
+
 
         // Explicitly sum the results with an adder tree.
         // Rounding & Saturation mode, which improve accuracy, prevent Vivado from expression balancing
