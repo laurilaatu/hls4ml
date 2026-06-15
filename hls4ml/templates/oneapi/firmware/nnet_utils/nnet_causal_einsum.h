@@ -56,7 +56,8 @@ template <typename data_T, typename CONFIG_T> struct CausalState {
     static constexpr unsigned BRAM_SIZE = CONFIG_T::n_ctx * CONFIG_T::n_inplace * CONFIG_T::n_contract * CONFIG_T::n_free1;
 
     struct State {
-        data_T causal_buff[BRAM_SIZE];
+        //[[intel::numbanks(CONFIG_T::n_ctx), intel::bankwidth(sizeof(data_T))]] 
+	    [[intel::singlepump]] data_T causal_buff[BRAM_SIZE];
         unsigned write_ptrs[CONFIG_T::n_inplace];
         unsigned ctx_cts[CONFIG_T::n_inplace];
     };
@@ -81,7 +82,7 @@ void read_causal_pipe(unsigned i, unsigned *write_ptrs, unsigned *ctx_cts, data_
 
     if (!CONFIG_T::contract_dim) {
         if (CAUSAL_PIPE_SIZE == C && L1 == 1) { // case where we have a dot product so stream is not 1xL1 but 1xC instead
-            #pragma unroll
+            //#pragma unroll
             for (unsigned l1 = 0; l1 < L1; l1++) {
                 // assumes stream is vector by vector (1xC each time)
                 data_buf_T buff = data_pipe::read();
@@ -95,7 +96,7 @@ void read_causal_pipe(unsigned i, unsigned *write_ptrs, unsigned *ctx_cts, data_
                 // assumes stream is vector by vector (1xL1 each time)
                 data_buf_T buff = data_pipe::read();
 
-                #pragma unroll
+                //#pragma unroll
                 for (unsigned l1 = 0; l1 < L1; l1++) {
                     causal_buffer[L1 * C * I * write_ptrs[i] + C * L1 * i + C * l1 + c] = buff[l1];
                 }
@@ -103,13 +104,36 @@ void read_causal_pipe(unsigned i, unsigned *write_ptrs, unsigned *ctx_cts, data_
         }
     } else {
         data_buf_T buff = data_pipe::read();
-        #pragma unroll
+        //#pragma unroll
         for (unsigned l1 = 0; l1 < L1; l1++) {
             causal_buffer[L1 * I * write_ptrs[i] + L1 * i + l1] = buff[l1];
         }
     }
-    ctx_cts[i] = std::min(ctx_cts[i] + 1, CTX);
-    write_ptrs[i] = (write_ptrs[i] + 1) % CTX;
+    ctx_cts[i] = (ctx_cts[i] + 1 < CTX)? (ctx_cts[i] + 1) : CTX;
+    write_ptrs[i] = (write_ptrs[i] + 1 >= CTX)? (write_ptrs[i] + 1 - CTX) : (write_ptrs[i] + 1);
+    //write_ptrs[i] = (write_ptrs[i] + 1) % CTX;
+}
+
+//read specific to contraction along the context
+template <class data_T, class data_buf_T, class data_pipe, typename CONFIG_T>
+void read_causal_pipe_ctx(data_buf_T &data_buff, unsigned i, unsigned *write_ptrs, unsigned *ctx_cts, data_T *causal_buffer) {
+
+    constexpr std::size_t CAUSAL_PIPE_SIZE = std::tuple_size<data_buf_T>::value;
+
+    constexpr unsigned C = CONFIG_T::n_contract;
+    constexpr unsigned I = CONFIG_T::n_inplace;
+    constexpr unsigned L1 = CONFIG_T::n_free1;
+    constexpr unsigned CTX = CONFIG_T::n_ctx;
+    
+    unsigned wptr = (write_ptrs[i]+CTX-1) % CTX;
+    unsigned offset = L1 * I * wptr + L1 * i;    
+    #pragma unroll
+    for (unsigned l1 = 0; l1 < L1; l1++) {
+            causal_buffer[offset + l1] = data_buff[l1];
+    }
+
+    //ctx_cts[i] = std::min(ctx_cts[i] + 1, CTX);
+    //write_ptrs[i] = (write_ptrs[i] + 1) % CTX;
 }
 
 // reads a contraction length unit from stream used for datas of dimension > 2
@@ -214,7 +238,7 @@ template <class data0_pipe, class data1_pipe, class res_pipe, typename CONFIG_T>
                             for (unsigned l1 = 0; l1 < L1; l1++) {
                                 accum_T tmp = 0;
 
-                                #pragma unroll 4
+                                //#pragma unroll 4
                                 for (unsigned c = 0; c < C; c++) {
                                     tmp += data_vect_buffer[c] * causal_buff[ctx_offset + C * L1 * i + C * l1 + c];
                                 }
@@ -236,20 +260,34 @@ template <class data0_pipe, class data1_pipe, class res_pipe, typename CONFIG_T>
             } else { // CONTRACT ALONG THE CONTEXT - In this mode L0 == CTX and C is irrelevant
 
                 read_stateless_pipe<data0_T, data0_pipe, CONFIG_T>(data_vect_buffer);
-                read_causal_pipe<data1_T, data1_pipe, CONFIG_T>(i, write_ptrs, ctx_cts, causal_buff);
+		
+		[[intel::fpga_register]] data1_buf_T causal_data = data1_pipe::read();
+		[[intel::fpga_register]] data1_buf_T causal_data_operate = causal_data;
+		
+		ctx_cts[i] = (ctx_cts[i] + 1 < CTX)? (ctx_cts[i] + 1) : CTX;
+        //write_ptrs[i] = (write_ptrs[i] + 1) % CTX;
+        write_ptrs[i] = (write_ptrs[i] + 1 >= CTX)? (write_ptrs[i] + 1 - CTX) : (write_ptrs[i] + 1);
+		
                 unsigned offset_ctx = (ctx_cts[i] == CTX) ? write_ptrs[i] : 0;
 
                 #pragma unroll 4
                 for (unsigned l1 = 0; l1 < L1; l1++) {
                     accum_T tmp = 0;
+		            tmp = (CTX-1 < ctx_cts[i]) ? (data_vect_buffer[CTX-1] * causal_data_operate[l1]) : (data_vect_buffer[ctx_cts[i]-1] * causal_data_operate[l1]);
+                    for (unsigned ctx = 0; ctx < CTX-1; ctx++) {
+                        if (ctx < ctx_cts[i]-1){
 
-                    for (unsigned ctx = 0; ctx < CTX; ctx++) {
-                        if (ctx < ctx_cts[i])
-                            tmp += data_vect_buffer[ctx] * causal_buff[L1 * I * ((offset_ctx + ctx) % CTX) + L1 * i + l1];
+                            unsigned idx = offset_ctx + ctx;
+                            //unsigned offset_to_buffer = (offset_ctx + ctx) % CTX;
+                            unsigned offset_to_buffer = (idx >= CTX) ? idx - CTX : idx;
+                            tmp += data_vect_buffer[ctx] * causal_buff[L1 * I * offset_to_buffer + L1 * i + l1];
+                        }
                     }
                     res_buffer[l1] = static_cast<res_T>(tmp);
                 }
+
                 res_pipe::write(res_buffer);
+                read_causal_pipe_ctx<data1_T, data1_buf_T, data1_pipe, CONFIG_T>(causal_data, i, write_ptrs, ctx_cts, causal_buff);
             }
         }
     }
