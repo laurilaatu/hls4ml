@@ -57,7 +57,8 @@ conv1d_config_template = """struct config{index} : nnet::conv1d_config {{
     typedef {weight_t.name} weight_t;
     typedef {config_t} mult_config;
 
-    static constexpr weight_t weights = {weights};
+    static constexpr unsigned num_banks = DIV_ROUNDUP(n_chan, reuse_factor);
+    [[intel::fpga_memory, intel::numbanks(num_banks), intel::bankwidth(sizeof(weight_t::value_type))]] static constexpr weight_t weights = {weights};
     static constexpr bias_t biases = {biases};
 }};
 """
@@ -191,7 +192,9 @@ conv2d_config_template = """struct config{index} : nnet::conv2d_config {{
     typedef {weight_t.name} weight_t;
     typedef {config_t} mult_config;
 
-    static constexpr weight_t weights = {weights};
+    // This part needs testing
+    static constexpr unsigned num_banks = DIV_ROUNDUP(n_chan, reuse_factor);
+    [[intel::fpga_memory, intel::numbanks(num_banks), intel::bankwidth(sizeof(weight_t::value_type))]] static constexpr weight_t weights = {weights};
     static constexpr bias_t biases = {biases};
 
 }};\n"""
