@@ -34,8 +34,8 @@ dense_config_template = """struct config{index}_dense : nnet::dense_config {{
     typedef {weight_t.name} weight_t;
 
     // Transpose at compile-time since einsum_dense_stream should not lose time.
-    [[intel::fpga_memory, intel::numbanks(num_banks), intel::bankwidth(sizeof(weight_t::value_type))]] static constexpr weight_t weights = tpose<weight_t,{n_in},{n_out}>({weights});
-    static constexpr bias_t biases = {biases};
+    [[intel::fpga_memory, intel::numbanks(num_banks), intel::bankwidth(sizeof(weight_t::value_type))]] static constexpr weight_t weights = tpose<weight_t,{n_in},{n_out}>({w});
+    static constexpr bias_t biases = {b};
 
     template<class x_T, class y_T>
     using product = nnet::product::{product_type}<x_T, y_T>;
@@ -98,6 +98,9 @@ class EinsumDenseConfigTemplate(LayerConfigTemplate):
 
     def dense_config(self, node: EinsumDense):
         dense_params = self._default_config_params(node)
+
+        dense_params['w'] = node.get_weights('weight').name
+        dense_params['b'] = node.get_weights('bias').name
 
         dense_params['n_in'] = node.attributes['n_contract']
         dense_params['n_out'] = node.attributes['n_free_kernel']
@@ -202,13 +205,13 @@ class EinsumDenseFunctionTemplate(FunctionCallTemplate):
 
     def format(self, node):
         params = self._default_function_params(node)
-        params['biases'] = node.get_weights('bias').name
+        params['b'] = node.get_weights('bias').name
 
         strategy = node.attributes['strategy']
         if strategy == 'distributed_arithmetic':
             return einsum_dense_function_template.format(**params)
 
-        params['weights'] = node.get_weights('weight').name
+        params['w'] = node.get_weights('weight').name
 
         return einsum_dense_function_template.format(**params)
 
@@ -236,7 +239,7 @@ class EinsumDenseStreamFunctionTemplate(StreamFunctionCallTemplate):
     def format(self, node):
         params = self._default_function_params(node)
         params['name'] = node.name
-        params['weights'] = node.get_weights('weight').name
-        params['biases'] = node.get_weights('bias').name
+        params['w'] = node.get_weights('weight').name
+        params['b'] = node.get_weights('bias').name
 
         return self.template.format(**params)

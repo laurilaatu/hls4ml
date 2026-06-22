@@ -384,6 +384,10 @@ class OneAPIWriter(Writer):
                 elif 'MyProject' in line:
                     newline = line.replace('MyProject', convert_to_pascal_case(project_name))
 
+                elif '// hls-fpga-machine-learning use host_reads' in line:
+                    newline = line
+                    newline += '#define HOST_READS 1'
+
                 elif '// hls-fpga-machine-learning insert bram' in line:
                     newline = line
                     for bram in model_brams:

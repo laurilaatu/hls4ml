@@ -209,7 +209,10 @@ class OneAPIBackend(FPGABackend):
         try:
             subprocess.run('which icpx', shell=True, cwd=builddir, check=True)
         except subprocess.CalledProcessError:
-            raise RuntimeError('Could not find icpx. Please configure oneAPI appropriately')
+            try:
+                subprocess.run('which ahls', shell=True, cwd=builddir, check=True)
+            except subprocess.CalledProcessError:
+                raise RuntimeError('Could not find ahls. Please configure oneAPI appropriately')
         subprocess.run('cmake ..', shell=True, cwd=builddir, check=True)
         subprocess.run(f'make {build_type}', shell=True, cwd=builddir, check=True)
 
