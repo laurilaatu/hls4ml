@@ -388,6 +388,57 @@ class OneAPIWriter(Writer):
                     newline = line
                     newline += '#define HOST_READS 1'
 
+                elif '// hls-fpga-machine-learning crete host mems' in line and model['IOConfig'] == 'io_autoreg':
+                    newline = line
+                    for inp in model_inputs:
+                        name = inp.name
+                        newline += f'using {name}_item_t = typename {name}_t::value_type;'
+                        newline += f'{name}_item_t* {name}_vals = sycl::malloc_host<{name}_t>({inp.size_cpp()}, q);'
+                        newline += f'if ({name}_vals == nullptr)' + '{'
+                        newline += indent + f'std::cerr << "ERROR: host allocation failed for {inp.name}\n";'
+                        newline += indent + 'fout.close();'
+                        newline += indent + 'return 1;'
+                        newline += '}'
+
+                    for opt in model_outputs:
+                        name = opt.name
+                        newline += f'using {name}_item_t = typename {name}_t::value_type;'
+                        newline += f'{name}_item_t* {name}_vals = sycl::malloc_host<{name}_t>({opt.size_cpp()}, q);'
+                        newline += f'if ({name}_vals == nullptr)' + '{'
+                        newline += indent + f'std::cerr << "ERROR: host allocation failed for {opt.name}\n";'
+                        newline += indent + 'fout.close();'
+                        newline += indent + 'return 1;'
+                        newline += '}'
+
+                elif '// hls-fpga-machine-learning fill inputs' in line:
+                    newline = line
+                    for inp in model_inputs:
+                        name = inp.name
+                        try:
+                            with open(f'{inp.name}_vals.tb', 'r') as file:
+                                vec_str = f'{name}_t {name}_vals = {'
+                                inp_data = file.readline()
+                                vec_str += inp_data + '};'
+                                try:
+                                    file.readline()
+                                except:
+                                    Warning ("File format incorrect, using default input of zeros")
+                                    vec_str = f'{name}_t {name}_vals = {'
+                                inp_data = [0] * inp.size_cpp()
+                                vec_str += ','.join(inp_data) + '};'
+                            newline += vec_str
+                        except: 
+                            Warning ("File not found, using default input of zeros")
+                            vec_str = f'{name}_t {name}_vals = {'
+                            inp_data = [0] * inp.size_cpp()
+                            vec_str += ','.join(inp_data) + '};'
+                            newline += vec_str
+
+                            
+
+
+
+
                 elif '// hls-fpga-machine-learning insert bram' in line:
                     newline = line
                     for bram in model_brams:

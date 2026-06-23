@@ -97,7 +97,8 @@ int main(int argc, char **argv) {
 
     // Create the required host memory
 
-    using token_t = typename token_inputs_t::value_type;
+    // hls-fpga-machine-learning crete host mems 
+    /*using token_t = typename token_inputs_t::value_type;
     token_t *token_inputs_vals = sycl::malloc_host<token_t>(PREFILL_TOKENS, q);
     if(token_inputs_vals == nullptr){
         std::cerr << "ERROR: host allocation failed for input\n";
@@ -112,6 +113,7 @@ int main(int argc, char **argv) {
         fout.close();
         return 1;
     }
+    
 
     using opt_t = typename token_inputs_t::value_type;
     float *outputs = sycl::malloc_host<float>(TOTAL_TOKENS, q);
@@ -120,6 +122,7 @@ int main(int argc, char **argv) {
         fout.close();
         return 1;
     }
+    */
 
     volatile uint32_t *ttft_flag = sycl::malloc_shared<uint32_t>(1, q);
     if(ttft_flag == nullptr){
