@@ -62,14 +62,15 @@ Load:
         for (int im = 0; im < CONFIG_T::block_factor; im++) {
             uint32_t w_index = ir + CONFIG_T::reuse_factor * im;
             out_index[ir][im] = (w_index / CONFIG_T::multiplier_factor);
-            d_index[ir][im] = (w_index >= CONFIG_T::n_in) ? (w_index - CONFIG_T::n_in) : w_index; // FPGA does not like modulo
+            d_index[ir][im] =
+                (w_index >= CONFIG_T::n_in) ? (w_index - CONFIG_T::n_in) : w_index; // FPGA does not like modulo
         }
     }
 Product1:
     [[intel::nofusion, intel::speculated_iterations(0)]] for (int ir = 0; ir < CONFIG_T::reuse_factor; ir++) {
         [[intel::fpga_register]] typename CONFIG_T::accum_t tmp_acc[CONFIG_T::block_factor];
     Product2:
-        #pragma unroll 
+        #pragma unroll
         for (int im = 0; im < CONFIG_T::block_factor; im++) {
             uint32_t w_index = ir + (CONFIG_T::reuse_factor_rounded)*im;
             if (w_index >= CONFIG_T::reuse_factor_rounded * CONFIG_T::block_factor_rounded)
@@ -86,8 +87,8 @@ Product1:
         for (int imult = 0; imult < CONFIG_T::multiplier_limit; imult++) {
             mult[imult] = 0;
         }
-    AccumLoop1: 
-        #pragma unroll 
+    AccumLoop1:
+        #pragma unroll
         for (int im = 0; im < CONFIG_T::block_factor; im++) {
             int o_index = out_index[ir][im];
             if (o_index >= CONFIG_T::n_out)
@@ -95,7 +96,7 @@ Product1:
             mult[o_index] += tmp_acc[im];
         }
     AccumLoop2:
-        #pragma unroll 
+        #pragma unroll
         for (int im = 0; im < CONFIG_T::multiplier_limit; im++) {
             acc[im] += mult[im];
         }
@@ -107,8 +108,7 @@ Store:
     }
 }
 
-
-// NEEDS EDGE CASE HANDLING LIKE SAY RF = 5 
+// NEEDS EDGE CASE HANDLING LIKE SAY RF = 5
 template <class data_T, class res_T, typename CONFIG_T>
 void dense_rf_lt(const data_T &data, res_T &res, const typename CONFIG_T::weight_t &weights,
                  const typename CONFIG_T::bias_t &biases) {
@@ -117,24 +117,25 @@ void dense_rf_lt(const data_T &data, res_T &res, const typename CONFIG_T::weight
            "The current Reuse Factor is not allowed");
 
     assert((CONFIG_T::multiplier_limit == CONFIG_T::block_factor) && "This function is correct only for RF <= N_IN");
-    
+
     // Declared as memory to avoid state feedback issues
     [[intel::fpga_memory]] typename CONFIG_T::accum_t acc[CONFIG_T::n_out];
-    
+
     unsigned w_offset = 0;
     unsigned data_offset = 0;
-    constexpr unsigned N_BANKS = CONFIG_T::num_banks; // overestimated val//CONFIG_T::n_in/CONFIG_T::reuse_factor;
+    constexpr unsigned N_BANKS = CONFIG_T::num_banks;    // overestimated val//CONFIG_T::n_in/CONFIG_T::reuse_factor;
     [[intel::nofusion, intel::speculated_iterations(0)]] // each reuse loop is seperate
-    for (unsigned reuse_unit = 0; reuse_unit < CONFIG_T::reuse_factor; reuse_unit++) { 
+    for (unsigned reuse_unit = 0; reuse_unit < CONFIG_T::reuse_factor; reuse_unit++) {
         data_offset = N_BANKS * reuse_unit;
-        for(unsigned el = 0; el < CONFIG_T::n_out; el++){
+        for (unsigned el = 0; el < CONFIG_T::n_out; el++) {
             w_offset = N_BANKS * reuse_unit + CONFIG_T::n_in * el;
-            if(reuse_unit == 0) acc[el] = biases[el];
+            if (reuse_unit == 0)
+                acc[el] = biases[el];
             #pragma unroll
-            for(unsigned i = 0; i < N_BANKS; i++){
+            for (unsigned i = 0; i < N_BANKS; i++) {
                 acc[el] += data[data_offset + i] * weights[w_offset + i];
-            } 
-        } 
+            }
+        }
     }
 
 // Cast to "res_t" type
@@ -145,10 +146,9 @@ Result:
     }
 }
 
-
 template <class data_T, class res_T, typename CONFIG_T> void dense_resource(const data_T &data, res_T &res) {
     if (CONFIG_T::reuse_factor <= CONFIG_T::n_in) {
-	    dense_rf_lt<data_T, res_T, CONFIG_T>(data, res, CONFIG_T::weights, CONFIG_T::biases);
+        dense_rf_lt<data_T, res_T, CONFIG_T>(data, res, CONFIG_T::weights, CONFIG_T::biases);
     } else {
         dense_rf_gt<data_T, res_T, CONFIG_T>(data, res, CONFIG_T::weights, CONFIG_T::biases);
     }

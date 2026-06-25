@@ -21,7 +21,7 @@ void normalize_stream(typename CONFIG_T::scale_t scale, typename CONFIG_T::bias_
                                typename CONFIG_T::scale_t::value_type>::limit(multiplier_limit);
 
 BatchNormLoop:
-    //[[intel::initiation_interval(pipeline)]] 
+    //[[intel::initiation_interval(pipeline)]]
     for (int i = 0; i < CONFIG_T::n_in / datasize; i++) {
         auto in_data = data_pipe::read();
         typename ExtractPipeType<res_pipe>::value_type out_data;

@@ -9,7 +9,8 @@ embed_config_template = """struct config{index} : nnet::embed_config {{
     static const unsigned reuse_factor = {reuse};
     static const unsigned num_banks = DIV_ROUNDUP(n_out, reuse_factor);
     typedef {embeddings_t.name} embeddings_t;
-    [[intel::fpga_memory, intel::numbanks(num_banks), intel::bankwidth(sizeof(embeddings_t::value_type))]] static constexpr embeddings_t embeddings = {e};
+    [[intel::fpga_memory, intel::numbanks(num_banks),
+    intel::bankwidth(sizeof(embeddings_t::value_type))]] static constexpr embeddings_t embeddings = {e};
 }};\n"""
 
 embed_function_template = 'nnet::embedding<{input_t}, {output_t}, {config}>({input}, {output}, {e});'
