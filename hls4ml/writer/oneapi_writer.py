@@ -1,4 +1,5 @@
 import glob
+import math
 import os
 import tarfile
 from collections import OrderedDict
@@ -101,6 +102,10 @@ class OneAPIWriter(Writer):
         project_name = model.config.get_project_name()
 
         filedir = os.path.dirname(os.path.abspath(__file__))
+
+        # autoreg_model: bool = model.config.get_config_value('HLSConfig').setdefault('Autoregressive', None)
+        maxInvoc = model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+
         with (
             open(os.path.join(filedir, '../templates/oneapi/firmware/myproject.cpp')) as f,
             open(f'{model.config.get_output_dir()}/src/firmware/{project_name}.cpp', 'w') as fout,
@@ -131,6 +136,12 @@ class OneAPIWriter(Writer):
                             for var in vars:
                                 if var not in model_inputs and var not in model_outputs:
                                     newline += var.declare_cpp()
+
+                elif '// hls-fpga-machine-learning insert invocation props' in line and maxInvoc is not None:
+                    newline = line
+                    newline += indent + 'using ts_invoc_props = decltype(sycl::ext::oneapi::experimental::properties{\n'
+                    newline += indent + indent + f'sycl::ext::altera::experimental::invocation_capacity<{maxInvoc}>,\n'
+                    newline += indent + indent + f'sycl::ext::altera::experimental::response_capacity<{maxInvoc}>' + '});\n'
 
                 # Read in inputs
                 elif '// hls-fpga-machine-learning read in' in line:
@@ -226,7 +237,9 @@ class OneAPIWriter(Writer):
                 elif '// hls-fpga-machine-learning insert inputs' in line:
                     newline = line
                     for inp in model_inputs:
-                        newline += inp.declare_cpp()
+                        newline += inp.declare_cpp(
+                            pipe_min_size=min(64, math.prod([int(it) for it in inp.size_cpp().split('*')]))
+                        )  # TODO: Find a more robust sizing for custom packing types
 
                 # Insert weights
                 elif '// hls-fpga-machine-learning insert weights' in line:
@@ -240,7 +253,9 @@ class OneAPIWriter(Writer):
                 elif '// hls-fpga-machine-learning insert outputs' in line:
                     newline = line
                     for out in model_outputs:
-                        newline += out.declare_cpp()
+                        newline += out.declare_cpp(
+                            pipe_min_size=min(64, math.prod([int(it) for it in out.size_cpp().split('*')]))
+                        )  # TODO: Find a more robust sizing for custom packing types
 
                 # Simply copy line, if no inserts are required
                 else:
@@ -297,6 +312,10 @@ class OneAPIWriter(Writer):
                     ):
                         newline += '#include "%s"\n' % include
 
+                    # Extra required include for host RW
+                    if model.config.get_config_value('HLSConfig').setdefault('HostRW', 0):
+                        newline += '#include "nnet_utils/nnet_data_movement.h"\n'
+
                 elif '// hls-fpga-machine-learning insert layer-config' in line:
                     newline = line
                     for layer in model.get_layers():
@@ -307,7 +326,7 @@ class OneAPIWriter(Writer):
                 elif '// hls-fpga-machine-learning insert softmax tables' in line:
                     newline = line
                     for layer in model.get_layers():
-                        if 'softmax' in layer.name:
+                        if layer.get_attr('activation') == 'softmax' or layer.get_attr('recurrent_activation') == 'softmax':
                             newline += f'#include "nnet_utils/activation_tables/{layer.name}_exp_table.h"\n'
                             newline += f'#include "nnet_utils/activation_tables/{layer.name}_inv_table.h"\n'
 
@@ -372,6 +391,8 @@ class OneAPIWriter(Writer):
                     output_predictions, f'{model.config.get_output_dir()}/tb_data/tb_output_predictions.dat'
                 )
 
+        host_rw_model: bool = model.config.get_config_value('HLSConfig').setdefault('HostRW', 0)
+
         with (
             open(os.path.join(filedir, '../templates/oneapi/myproject_test.cpp')) as f,
             open(f'{model.config.get_output_dir()}/src/{project_name}_test.cpp', 'w') as fout,
@@ -386,63 +407,163 @@ class OneAPIWriter(Writer):
 
                 elif '// hls-fpga-machine-learning use host_reads' in line:
                     newline = line
-                    newline += '#define HOST_READS 1'
+                    if host_rw_model:
+                        newline += '#define HOST_READS 1\n'
+                    else:
+                        newline += '#define HOST_READS 0\n'
 
-                elif '// hls-fpga-machine-learning crete host mems' in line and model['IOConfig'] == 'io_autoreg':
+                elif '// hls-fpga-machine-learning crete host mems' in line and host_rw_model:
                     newline = line
-                    for inp in model_inputs:
-                        name = inp.name
-                        newline += f'using {name}_item_t = typename {name}_t::value_type;'
-                        newline += f'{name}_item_t* {name}_vals = sycl::malloc_host<{name}_t>({inp.size_cpp()}, q);'
-                        newline += f'if ({name}_vals == nullptr)' + '{'
-                        newline += indent + f'std::cerr << "ERROR: host allocation failed for {inp.name}\n";'
-                        newline += indent + 'fout.close();'
-                        newline += indent + 'return 1;'
-                        newline += '}'
 
-                    for opt in model_outputs:
-                        name = opt.name
-                        newline += f'using {name}_item_t = typename {name}_t::value_type;'
-                        newline += f'{name}_item_t* {name}_vals = sycl::malloc_host<{name}_t>({opt.size_cpp()}, q);'
-                        newline += f'if ({name}_vals == nullptr)' + '{'
-                        newline += indent + f'std::cerr << "ERROR: host allocation failed for {opt.name}\n";'
-                        newline += indent + 'fout.close();'
-                        newline += indent + 'return 1;'
-                        newline += '}'
+                    for idx, inp in enumerate(model_inputs):
+                        inp_type = inp.definition_cpp().split(' ')[0]
+                        num = idx if idx >= 1 else ''
+                        newline += indent + f'using {inp.name}_item_t = typename {inp_type}::value_type;\n'
+                        newline += (
+                            indent
+                            + f'{inp.name}_item_t* {inp.name}_vals = '
+                            + f'sycl::malloc_host<{inp.name}_item_t>({inp.size_cpp()}, q);\n'
+                        )
+                        newline += indent + f'if ({inp.name}_vals == nullptr)' + '{\n'
+                        newline += (
+                            indent + indent + f'std::cerr << "ERROR: host allocation failed for {inp.name} (input{num})";\n'
+                        )
+                        newline += indent + indent + 'fout.close();\n'
+                        newline += indent + indent + 'return 1;\n'
+                        newline += indent + '}\n'
 
-                elif '// hls-fpga-machine-learning fill inputs' in line:
+                    for idx, out in enumerate(model_outputs):
+                        out_type = out.definition_cpp().split(' ')[0]
+                        num = idx if idx >= 1 else ''
+                        newline += indent + f'using output{num}_item_t = typename {out_type}::value_type;\n'
+                        newline += (
+                            indent
+                            + f'output{num}_item_t* output{num}_vals = '
+                            + f'sycl::malloc_host<output{num}_item_t>({out.size_cpp()}, q);\n'
+                        )
+                        newline += indent + f'if (output{num}_vals == nullptr)' + '{\n'
+                        newline += (
+                            indent + indent + f'std::cerr << "ERROR: host allocation failed for {out.name} (output{num})";\n'
+                        )
+                        newline += indent + indent + 'fout.close();\n'
+                        newline += indent + indent + 'return 1;\n'
+                        newline += indent + '}\n'
+
+                elif '// hls-fpga-machine-learning fill inputs' in line and host_rw_model:
                     newline = line
-                    for inp in model_inputs:
+                    for idx, inp in enumerate(model_inputs):
+                        num = idx if idx >= 1 else ''
                         name = inp.name
+                        vec_str = indent + f'{inp.name}_item_t {inp.name}_prefill[{inp.size_cpp()}] = ' + '{\n'
                         try:
-                            with open(f'{inp.name}_vals.tb', 'r') as file:
-                                vec_str = f'{name}_t {name}_vals = {'
+                            with open(f'{inp.name}_vals.tb') as file:
                                 inp_data = file.readline()
-                                vec_str += inp_data + '};'
-                                try:
-                                    file.readline()
-                                except:
-                                    Warning ("File format incorrect, using default input of zeros")
-                                    vec_str = f'{name}_t {name}_vals = {'
-                                inp_data = [0] * inp.size_cpp()
-                                vec_str += ','.join(inp_data) + '};'
-                            newline += vec_str
-                        except: 
-                            Warning ("File not found, using default input of zeros")
-                            vec_str = f'{name}_t {name}_vals = {'
-                            inp_data = [0] * inp.size_cpp()
-                            vec_str += ','.join(inp_data) + '};'
-                            newline += vec_str
+                                vec_str += inp_data + '};\n'
 
-                            
+                                if file.readline():
+                                    print(f'WARNING: File format incorrect for {name}, using default input of zeros')
+                                    zeros = ','.join(['0'] * math.prod([int(it) for it in inp.size_cpp().split('*')]))
+                                    vec_str = (
+                                        indent + f'{inp.name}_item_t {inp.name}_prefill[{inp.size_cpp()}] = {{{zeros}}};\n'
+                                    )
 
+                        except FileNotFoundError:
+                            print(f'WARNING: File not found, using default input of zeros for {name}')
+                            zeros = ','.join(['0'] * math.prod([int(it) for it in inp.size_cpp().split('*')]))
+                            vec_str = indent + f'{inp.name}_item_t {inp.name}_prefill[{inp.size_cpp()}] = {{{zeros}}};\n'
 
+                        newline += vec_str
 
+                        size = math.prod([int(it) for it in inp.size_cpp().split('*')])
+                        newline += indent + f'for(int j = 0; j < {size}; j++) {inp.name}_vals[j] = {inp.name}_prefill[j];\n'
+
+                    # For debugging
+                    newline += indent + 'std::cout << "Filled arrays are:" << std::endl;\n'
+                    for inp in model_inputs:
+                        size = math.prod([int(it) for it in inp.size_cpp().split('*')])
+                        newline += indent + f'std::cout << "{inp.name} (input{num}): ";\n'
+                        newline += indent + f'for(int j = 0; j < {size - 1}; j++) std::cout << {inp.name}_vals[j] << ",";\n'
+                        newline += indent + f'std::cout << {inp.name}_vals[{size - 1}] << std::endl;\n'
+
+                elif '// hls-fpga-machine-learning launch kernels' in line and host_rw_model:  # TODO: TRY WITH 2+ INPUTS
+                    newline = line
+                    inp_names = ','.join([f'{inp.name}_vals' for inp in model_inputs])
+                    out_names = ','.join([f'output{idx if idx >= 1 else ""}_vals' for idx, out in enumerate(model_outputs)])
+                    out_t = ','.join([f'output{idx if idx >= 1 else ""}_item_t' for idx, out in enumerate(model_outputs)])
+                    out_pipe_names = ','.join([out.pipe_name for out in model_outputs])
+                    out_sizes = ','.join([out.size_cpp() for out in model_outputs])
+
+                    for idx, inp in enumerate(model_inputs):
+                        num = idx if idx >= 1 else ''
+                        newline += (
+                            indent + f'using {inp.name}_pair = nnet::SrcPipePair<{inp.name}_item_t, {inp.pipe_name}>;\n'
+                        )
+
+                    pairs = ','.join([f'{inp.name}_pair' for idx, inp in enumerate(model_inputs)])
+                    newline += (
+                        indent
+                        + f'q.single_task(nnet::DMA_convert_data<{pairs}>'
+                        + '{'
+                        + inp_names
+                        + f', {inp.size_cpp()}'
+                        + '});\n'
+                    )
+                    newline += indent + 'q.single_task(Myproject{});\n'
+                    newline += (
+                        indent
+                        + 'constexpr unsigned packing = '
+                        + f'{out_sizes}/std::tuple_size<typename nnet::ExtractPipeType<{out_pipe_names}>::value_type>'
+                        + '{'
+                        + '};\n'
+                    )  # TODO: EXTREMELY DODGY FOR OUT SIZE > 1
+                    newline += (
+                        indent
+                        + 'q.single_task(nnet::DMA_convert_data_back<'
+                        + out_pipe_names
+                        + ', '
+                        + out_t
+                        + ', uint32_t>{'
+                        + out_names
+                        + ', ttft_flag, packing}).wait();\n'
+                    )
+
+                elif '// hls-fpga-machine-learning write out to file' in line and host_rw_model:
+                    newline = line
+                    for idx, out in enumerate(model_outputs):
+                        num = idx if idx >= 1 else ''
+                        newline += (
+                            indent
+                            + f'constexpr unsigned output{num}_pipeOutSize = '
+                            + f'std::tuple_size<typename nnet::ExtractPipeType<{out.pipe_name}>::value_type>'
+                            + '{'
+                            + '};\n'
+                        )
+                        newline += (
+                            indent + 'for (int i = 0; i < 1; i++) ' + '{\n'
+                        )  # TODO: ADJUST FOR NUMBER OF EXPECTED TOKENS BASED ON IF WE ARE DOING AUTOREG MODEL OR NOT
+                        newline += indent + indent + f'for (int j = 0; j < output{num}_pipeOutSize; j++) ' + '{\n'
+                        newline += (
+                            indent + indent + indent + f'fout << output{num}_vals[i * output{num}_pipeOutSize + j] << " ";\n'
+                        )
+                        newline += indent + indent + '}\n'
+                        newline += indent + indent + 'fout << std::endl;\n'
+                        newline += indent + '}'
+
+                # Free memory only if we have the host reads flag
+                elif '// hls-fpga-machine-learning free host mem' in line and host_rw_model:
+                    newline = line
+                    for idx, inp in enumerate(model_inputs):
+                        num = idx if idx >= 1 else ''
+                        newline += indent + f'sycl::free({inp.name}_vals, q);\n'
+                    for idx in range(len(model_outputs)):
+                        num = idx if idx >= 1 else ''
+                        newline += indent + f'sycl::free(output{num}_vals, q);\n'
 
                 elif '// hls-fpga-machine-learning insert bram' in line:
                     newline = line
                     for bram in model_brams:
                         newline += f'#include "firmware/weights/{bram.name}.h"\n'
+
                 elif '// hls-fpga-machine-learning insert zero' in line:
                     newline = line
                     for inp in model_inputs:
@@ -464,11 +585,38 @@ class OneAPIWriter(Writer):
                         newline += (
                             indent + f'nnet::convert_data<float, {inp.pipe_name}, {inp.size_cpp()}>(q, {inp.name}_vals);\n'
                         )
+
                 elif '// hls-fpga-machine-learning convert output' in line:
                     newline = line
-                    out = model_outputs[0]
-                    newline += indent + f'float outputs[{out.size_cpp()}];\n'
-                    newline += indent + f'nnet::convert_data_back<{out.pipe_name}, float, {out.size_cpp()}>(q, outputs);\n'
+                    for out in model_outputs:
+                        newline += indent + f'float {out.name}_vals[{out.size_cpp()}];\n'
+                        newline += (
+                            indent
+                            + f'nnet::convert_data_back<{out.pipe_name}, float, {out.size_cpp()}>(q, {out.name}_vals);\n\n'
+                        )
+
+                        newline += (
+                            indent + f'fout << "OUTPUT: {out.name}, ITERATION: " << iteration << ", VALS: " << std::endl;\n'
+                        )
+                        newline += indent + f'for (auto outval : {out.name}_vals)' + '{\n'
+                        newline += indent + indent + 'fout << outval << " ";\n'
+                        newline += indent + '}\n'
+                        newline += indent + 'fout << std::endl;\n\n'
+
+                        newline += indent + f'std::cout << "OUTPUT: {out.name}, ITERATION: " << iteration << ", VALS: ";\n'
+                        newline += indent + f'for (auto outval : {out.name}_vals)' + '{\n'
+                        newline += indent + indent + 'std::cout << outval << " ";\n'
+                        newline += indent + '}\n'
+                        newline += indent + 'std::cout << std::endl;\n\n'
+
+                elif '// hls-fpga-machine-learning insert quantized' in line:
+                    newline = line
+                    newline += indent + f'std::cout << "OUTPUT: {out.name}, ITERATION: " << iteration << ", VALS: ";\n'
+                    newline += indent + f'for (auto outval : {out.name}_vals)' + '{\n'
+                    newline += indent + indent + 'std::cout << outval << " ";\n'
+                    newline += indent + '}\n'
+                    newline += indent + 'std::cout << std::endl;\n\n'
+
                 else:
                     newline = line
 
@@ -491,6 +639,9 @@ class OneAPIWriter(Writer):
         indent = '    '
 
         filedir = os.path.dirname(os.path.abspath(__file__))
+
+        host_rw_model: bool = model.config.get_config_value('HLSConfig').setdefault('HostRW', 0)
+
         with (
             open(os.path.join(filedir, '../templates/oneapi/myproject_bridge.cpp')) as f,
             open(f'{model.config.get_output_dir()}/src/{project_name}_bridge.cpp', 'w') as fout,
@@ -516,18 +667,45 @@ class OneAPIWriter(Writer):
 
                 elif '// hls-fpga-machine-learning insert header' in line:
                     dtype = line.split('#', 1)[1].strip()
-                    inputs_str = ', '.join([f'{dtype} {i.name}[{i.size_cpp()}]' for i in model_inputs])
-                    outputs_str = ', '.join([f'{dtype} {o.name}[{o.size_cpp()}]' for o in model_outputs])
+
+                    if not host_rw_model:
+                        inputs_str = ', '.join([f'{dtype} {i.name}[{i.size_cpp()}]' for i in model_inputs])
+                        outputs_str = ', '.join([f'{dtype} {o.name}[{o.size_cpp()}]' for o in model_outputs])
+                    else:
+                        inputs_str = ', '.join([f'{dtype} {i.name}_vals[{i.size_cpp()}]' for i in model_inputs])
+                        outputs_str = ', '.join(
+                            [
+                                f'{dtype} output{idx if idx >= 1 else ""}_vals[{o.size_cpp()}]'
+                                for idx, o in enumerate(model_outputs)
+                            ]
+                        )
 
                     newline = ''
                     newline += indent + inputs_str + ',\n'
                     newline += indent + outputs_str + '\n'
 
                 elif '// hls-fpga-machine-learning insert wrapper' in line:
-                    dtype = line.split('#', 1)[1].strip()
-                    newline = ''
-                    for i in model_inputs:
-                        newline += indent + f'nnet::convert_data<{dtype}, {i.pipe_name}, {i.size_cpp()}>(q, {i.name});\n'
+                    if not host_rw_model:
+                        dtype = line.split('#', 1)[1].strip()
+                        newline = ''
+                        for i in model_inputs:
+                            newline += indent + f'nnet::convert_data<{dtype}, {i.pipe_name}, {i.size_cpp()}>(q, {i.name});\n'
+                    else:
+                        dtype = line.split('#', 1)[1].strip()
+                        newline = ''
+
+                        for inp in model_inputs:
+                            newline += indent + f'using {inp.name}_pair = nnet::SrcPipePair<{dtype}, {inp.pipe_name}>;\n'
+                        pairs = ','.join([f'{inp.name}_pair' for idx, inp in enumerate(model_inputs)])
+                        inp_names = ','.join([f'{inp.name}_vals' for inp in model_inputs])
+                        newline += (
+                            indent
+                            + f'q.single_task(nnet::DMA_convert_data<{pairs}>'
+                            + '{'
+                            + inp_names
+                            + f', {model_inputs[0].size_cpp()}'
+                            + '});\n'
+                        )
 
                     newline += (
                         indent
@@ -535,12 +713,37 @@ class OneAPIWriter(Writer):
                         + f'({convert_to_pascal_case(project_name)}{{}});\n'
                     )
 
-                    for o in model_outputs:
-                        newline += (
-                            indent + f'nnet::convert_data_back<{o.pipe_name}, {dtype}, {o.size_cpp()}>(q, {o.name});\n'
-                        )
-                    newline += '\n'
-                    newline += indent + 'q.wait();\n'
+                    if not host_rw_model:
+                        for o in model_outputs:
+                            newline += (
+                                indent + f'nnet::convert_data_back<{o.pipe_name}, {dtype}, {o.size_cpp()}>(q, {o.name});\n'
+                            )
+                        newline += '\n'
+                        newline += indent + 'q.wait();\n'
+                    else:
+                        for out in model_outputs:
+                            out_names = ','.join(
+                                [f'output{idx if idx >= 1 else ""}_vals' for idx, out in enumerate(model_outputs)]
+                            )
+                            out_pipe_names = ','.join([out.pipe_name for out in model_outputs])
+                            out_sizes = ','.join([out.size_cpp() for out in model_outputs])
+                            newline += (
+                                indent
+                                + f'constexpr unsigned packing = {out_sizes}'
+                                + f'/std::tuple_size<typename nnet::ExtractPipeType<{out_pipe_names}>::value_type>'
+                                + '{'
+                                + '};\n'
+                            )
+                            newline += (
+                                indent
+                                + 'q.single_task(nnet::DMA_convert_data_back_bridge_ver<'
+                                + out_pipe_names
+                                + ', '
+                                + dtype
+                                + '>{'
+                                + out_names
+                                + ', packing}).wait();\n'
+                            )
 
                 elif '// hls-fpga-machine-learning insert trace_outputs' in line:
                     newline = ''
@@ -767,7 +970,7 @@ class OneAPIWriter(Writer):
     def __write_exp_table(self, model, path):
 
         for layer in model.get_layers():
-            if 'softmax' in layer.name:
+            if layer.get_attr('activation') == 'softmax' or layer.get_attr('recurrent_activation') == 'softmax':
                 table_name = layer.name + '_exp_table'
                 table_size = (
                     int(layer.get_attr('exp_table_size')) // 2
@@ -781,7 +984,9 @@ class OneAPIWriter(Writer):
                     h_file.write(f'#ifndef {header_name.upper()}_H_\n')
                     h_file.write(f'#define {header_name.upper()}_H_\n\n')
 
-                    h_file.write(f'static constexpr {table_name}_t {table_name}[{table_size}] = {{')
+                    h_file.write(
+                        f'static constexpr nnet::array<{layer.get_attr("exp_table_t").name},{table_size}> {table_name} = {{'
+                    )
 
                     ac_type = layer.get_attr('inp_norm_t')
 
@@ -823,7 +1028,7 @@ class OneAPIWriter(Writer):
 
     def __write_invert_table(self, model, path):
         for layer in model.get_layers():
-            if 'softmax' in layer.name:
+            if layer.get_attr('activation') == 'softmax' or layer.get_attr('recurrent_activation') == 'softmax':
                 table_name = layer.name + '_inv_table'
                 table_size = (
                     int(layer.get_attr('inv_table_size')) // 2
@@ -837,7 +1042,9 @@ class OneAPIWriter(Writer):
                     h_file.write(f'#ifndef {header_name.upper()}_H_\n')
                     h_file.write(f'#define {header_name.upper()}_H_\n\n')
 
-                    h_file.write(f'static constexpr {table_name}_t {table_name}[{table_size}] = {{')
+                    h_file.write(
+                        f'static constexpr nnet::array<{layer.get_attr("inv_table_t").name},{table_size}> {table_name} = {{'
+                    )
 
                     ac_type = layer.get_attr('inv_inp_t')
 

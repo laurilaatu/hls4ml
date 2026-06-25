@@ -6,6 +6,9 @@ from hls4ml.backends.oneapi.oneapi_template import StreamFunctionCallTemplate, T
 from hls4ml.model.layers import Embedding
 
 embed_task_sequence_template = 'task_sequence<nnet::embedding_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+embed_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::embedding_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
 embed_stream_function_template = '{name}.async();'
 
 
@@ -16,6 +19,11 @@ class EmbeddingTaskSequenceTemplate(TaskSequenceTemplate):
 
     def format(self, node):
         params = self._default_function_params(node)
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = embed_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
 
         return self.template.format(**params)
 

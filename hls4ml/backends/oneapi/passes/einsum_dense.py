@@ -34,7 +34,8 @@ dense_config_template = """struct config{index}_dense : nnet::dense_config {{
     typedef {weight_t.name} weight_t;
 
     // Transpose at compile-time since einsum_dense_stream should not lose time.
-    [[intel::fpga_memory, intel::numbanks(num_banks), intel::bankwidth(sizeof(weight_t::value_type))]] static constexpr weight_t weights = tpose<weight_t,{n_in},{n_out}>({w});
+    [[intel::fpga_memory, intel::numbanks(num_banks),
+    intel::bankwidth(sizeof(weight_t::value_type))]] static constexpr weight_t weights = tpose<weight_t,{n_in},{n_out}>({w});
     static constexpr bias_t biases = {b};
 
     template<class x_T, class y_T>
@@ -83,6 +84,10 @@ einsum_dense_function_template = 'nnet::einsum_dense<{input_t}, {output_t}, {con
 
 einsum_dense_stream_function_template = (
     'task_sequence<nnet::einsum_dense_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+)
+
+einsum_dense_stream_function_template_max_invoc = (
+    'task_sequence<nnet::einsum_dense_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
 )
 
 einsum_dense_stream_function_template_async = '{name}.async();'
@@ -227,6 +232,11 @@ class EinsumStreamTaskSequenceTemplate(TaskSequenceTemplate):
         if node.get_attr('data_format') == 'channels_first':
             raise RuntimeError('channels_first not supported on oneAPI')
         params['data_format'] = 'cl'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = einsum_dense_stream_function_template_max_invoc
+            params['maxInvoc'] = max_invoc
 
         return self.template.format(**params)
 

@@ -19,6 +19,10 @@ merge_task_sequence_template = (
     'task_sequence<nnet::{merge}_stream<{input1_pipe}, {input2_pipe}, {output_pipe}, {config}>> {name};'
 )
 
+merge_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::{merge}_stream<{input1_pipe}, {input2_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
+
 merge_stream_function_template = '{name}.async();'
 
 merge_include_list = ['nnet_utils/nnet_merge.h', 'nnet_utils/nnet_merge_stream.h']
@@ -62,6 +66,12 @@ class MergeTaskSequenceTemplate(TaskSequenceTemplate):
         params['merge'] = node.get_attr('op').lower()
         params['input1_pipe'] = node.get_input_variable(node.inputs[0]).pipe_name
         params['input2_pipe'] = node.get_input_variable(node.inputs[1]).pipe_name
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = merge_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
+
         return self.template.format(**params)
 
 

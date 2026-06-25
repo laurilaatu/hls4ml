@@ -158,6 +158,15 @@ def _check_hls_config(config, hls_config):
     if 'ContextLength' in hls_config:
         config['HLSConfig']['ContextLength'] = hls_config['ContextLength']
 
+    if 'HostRW' in hls_config:
+        config['HLSConfig']['HostRW'] = hls_config['HostRW']
+
+    if 'Autoregressive' in hls_config:
+        config['HLSConfig']['Autoregressive'] = hls_config['Autoregressive']
+
+    if 'MaxInvoc' in hls_config:
+        config['HLSConfig']['MaxInvoc'] = hls_config['MaxInvoc']
+
     return
 
 
@@ -241,6 +250,12 @@ def convert_from_keras_model(
     config['HLSConfig']['Model']['BitExact'] = bit_exact
     context_len = hls_config.get('ContextLength', None)
     config['HLSConfig']['ContextLength'] = context_len
+    hostrw = hls_config.get('HostRW', 0)
+    config['HLSConfig']['HostRW'] = hostrw
+    autoregressive = hls_config.get('Autoregressive', 0)
+    config['HLSConfig']['Autoregressive'] = autoregressive
+    max_invoc = hls_config.get('MaxInvoc', None)
+    config['HLSConfig']['MaxInvoc'] = max_invoc
 
     _check_hls_config(config, hls_config)
     if 'KerasModel' in config:
@@ -320,6 +335,14 @@ def convert_from_pytorch_model(
     config['HLSConfig']['Model'] = _check_model_config(model_config)
     config['InputShape'] = hls_config.get('InputShape')
     _check_hls_config(config, hls_config)
+    context_len = hls_config.get('ContextLength', None)
+    config['HLSConfig']['ContextLength'] = context_len
+    hostrw = hls_config.get('HostRW', 0)
+    config['HLSConfig']['HostRW'] = hostrw
+    autoregressive = hls_config.get('Autoregressive', 0)
+    config['HLSConfig']['Autoregressive'] = autoregressive
+    max_invoc = hls_config.get('MaxInvoc', None)
+    config['HLSConfig']['MaxInvoc'] = max_invoc
 
     return pytorch_to_hls(config)
 
@@ -389,6 +412,14 @@ def convert_from_onnx_model(
     config['HLSConfig']['Model'] = _check_model_config(model_config)
 
     _check_hls_config(config, hls_config)
+    context_len = hls_config.get('ContextLength', None)
+    config['HLSConfig']['ContextLength'] = context_len
+    hostrw = hls_config.get('HostRW', 0)
+    config['HLSConfig']['HostRW'] = hostrw
+    autoregressive = hls_config.get('Autoregressive', 0)
+    config['HLSConfig']['Autoregressive'] = autoregressive
+    max_invoc = hls_config.get('MaxInvoc', None)
+    config['HLSConfig']['MaxInvoc'] = max_invoc
 
     return onnx_to_hls(config)
 

@@ -43,6 +43,7 @@ inline constexpr unsigned kInputBufferLocation = 0;
 inline constexpr unsigned kOutputBufferLocation = 1;
 #endif
 
+/*
 // Implementation of a direct memory access kernel. Move data from source, convert,
 // and send to the sink. Adaptive to SYCL HLS and hardware acceleration flow.
 template <class tkn_src_T, class pos_src_T, class tkn_dest_pipe, class pos_dest_pipe> struct DMA_convert_data {
@@ -93,30 +94,85 @@ template <class tkn_src_T, class pos_src_T, class tkn_dest_pipe, class pos_dest_
         using TokenPipeDataType = typename nnet::ExtractPipeType<tkn_dest_pipe>::value_type;
         using PosPipeDataType = typename nnet::ExtractPipeType<pos_dest_pipe>::value_type;
         // By definition, both must have the same size
-	constexpr auto dstTypeSize = std::tuple_size<TokenPipeDataType>{};
+        constexpr auto dstTypeSize = std::tuple_size<TokenPipeDataType>{};
 
         [[intel::fpga_register]] TokenPipeDataType tkn_packet;
         [[intel::fpga_register]] PosPipeDataType pos_packet;
 
         // Keep sending data to the input layer and keep the kernels running.
         for (size_t i = 0; i < num_iteration; i++) {
-            
-	    #pragma unroll
+
+            #pragma unroll
             for (size_t j = 0; j < dstTypeSize; j++) {
                 tkn_packet[j] = tkn_src_ptr[i * dstTypeSize + j];
             }
             tkn_dest_pipe::write(tkn_packet);
-	    
-	    #pragma unroll 
-	    for (size_t j = 0; j < dstTypeSize; j++) {
+
+            #pragma unroll
+            for (size_t j = 0; j < dstTypeSize; j++) {
                 pos_packet[j] = pos_src_ptr[i * dstTypeSize + j];
             }
             pos_dest_pipe::write(pos_packet);
         }
     }
 };
+*/
 
-//Single data input version 
+template <class src_T, class Pipe> struct SrcPipePair {
+
+    using source_type = src_T;
+    using pipe_type = Pipe;
+
+#if !defined(IS_BSP)
+    sycl::ext::oneapi::experimental::annotated_arg<
+        src_T *,
+        decltype(sycl::ext::oneapi::experimental::properties{
+            sycl::ext::altera::experimental::latency<0>, sycl::ext::altera::experimental::dwidth<16>,
+            sycl::ext::altera::experimental::buffer_location<kInputBufferLocation>,
+            sycl::ext::altera::experimental::read_write_mode_read, sycl::ext::altera::experimental::wait_request_requested})>
+        src;
+#else
+    src_T *const src;
+#endif
+};
+
+// For any number of inputs
+template <class... SrcPipePairs> struct DMA_convert_data : SrcPipePairs... {
+
+    size_t total_inp_size;
+
+    [[intel::kernel_args_restrict]] void operator()() const { (process_pipe<SrcPipePairs>(), ...); }
+
+  private:
+    template <class SrcPipePair> void process_pipe() const {
+
+        using src_T = typename SrcPipePair::source_type;
+        using dest_pipe = typename SrcPipePair::pipe_type;
+        using PipeDataType = typename nnet::ExtractPipeType<dest_pipe>::value_type;
+        constexpr size_t PacketSize = std::tuple_size<PipeDataType>{};
+        auto src = static_cast<SrcPipePair const &>(*this).src;
+
+        size_t num_packets = total_inp_size / PacketSize;
+
+#if defined(IS_BSP)
+        sycl::ext::altera::host_ptr<src_T> src_ptr(src);
+#else
+        src_T *src_ptr = src;
+#endif
+
+        [[intel::fpga_register]] PipeDataType packet;
+
+        for (size_t i = 0; i < num_packets; ++i) {
+            #pragma unroll
+            for (size_t j = 0; j < PacketSize; j++) {
+                packet[j] = src_ptr[i * PacketSize + j];
+            }
+            dest_pipe::write(packet);
+        }
+    }
+};
+
+/*
 template <class src_T, class dest_pipe> struct DMA_convert_data {
 #if !defined(IS_BSP)
     // When targeting a device family, we instantiate an Avalon Memory Mapped Host for
@@ -147,14 +203,14 @@ template <class src_T, class dest_pipe> struct DMA_convert_data {
         // First, extract the PipeDataT from the pipe
         using PipeDataType = typename nnet::ExtractPipeType<dest_pipe>::value_type;
         // By definition, both must have the same size
-	    constexpr auto dstTypeSize = std::tuple_size<TokenPipeDataType>{};
+            constexpr auto dstTypeSize = std::tuple_size<TokenPipeDataType>{};
 
         [[intel::fpga_register]] PipeDataType packet;
 
         // Keep sending data to the input layer and keep the kernels running.
         for (size_t i = 0; i < num_iteration; i++) {
-            
-	        #pragma unroll
+
+                #pragma unroll
             for (size_t j = 0; j < dstTypeSize; j++) {
                 packet[j] = src_ptr[i * dstTypeSize + j];
             }
@@ -162,6 +218,7 @@ template <class src_T, class dest_pipe> struct DMA_convert_data {
         }
     }
 };
+*/
 
 // Symmetrical to the DMA_convert_data above, this DMA drains the output pipe and
 // writes result to memory.
@@ -169,20 +226,20 @@ template <class src_pipe, class dst_T, class ttft_flag_T> struct DMA_convert_dat
 #if !defined(IS_BSP)
     // Without BSP, instantiate an Avalon Memory Mapped Host to write to host.
     sycl::ext::oneapi::experimental::annotated_arg<
-        dst_T *,
-        decltype(sycl::ext::oneapi::experimental::properties{
-            sycl::ext::altera::experimental::latency<0>, sycl::ext::altera::experimental::dwidth<16>,
-            sycl::ext::altera::experimental::buffer_location<kOutputBufferLocation>,
-            sycl::ext::altera::experimental::read_write_mode_write, sycl::ext::altera::experimental::wait_request_requested})>
+        dst_T *, decltype(sycl::ext::oneapi::experimental::properties{
+                     sycl::ext::altera::experimental::latency<0>, sycl::ext::altera::experimental::dwidth<16>,
+                     sycl::ext::altera::experimental::buffer_location<kOutputBufferLocation>,
+                     sycl::ext::altera::experimental::read_write_mode_write,
+                     sycl::ext::altera::experimental::wait_request_requested})>
 #else
     // USM pointer, otherwise.
-    dst_T *const 
+    dst_T *const
 #endif
-    dst;
+        dst;
 
     volatile ttft_flag_T *const ttft_flag;
 
-    size_t num_iteration;
+    size_t num_packs;
 
     [[intel::kernel_args_restrict]] void operator()() const {
 #if defined(IS_BSP)
@@ -199,16 +256,59 @@ template <class src_pipe, class dst_T, class ttft_flag_T> struct DMA_convert_dat
         [[intel::fpga_register]] PipeDataType packet;
 
         // Drain the output pipe and write result to memory.
-        for (size_t i = 0; i < num_iteration; i++) {
+        for (size_t i = 0; i < num_packs; i++) {
             packet = src_pipe::read();
 
             #pragma unroll 4
             for (size_t j = 0; j < srcTypeSize; j++) {
                 dst_ptr[i * srcTypeSize + j] = static_cast<dst_T>(packet[j].to_double());
-	    }
-	    
-	    if(i == 0) *ttft_flag = 1;
+            }
 
+            if (i == 0)
+                *ttft_flag = 1;
+        }
+    }
+};
+
+template <class src_pipe, class dst_T> struct DMA_convert_data_back_bridge_ver {
+#if !defined(IS_BSP)
+    // Without BSP, instantiate an Avalon Memory Mapped Host to write to host.
+    sycl::ext::oneapi::experimental::annotated_arg<
+        dst_T *, decltype(sycl::ext::oneapi::experimental::properties{
+                     sycl::ext::altera::experimental::latency<0>, sycl::ext::altera::experimental::dwidth<16>,
+                     sycl::ext::altera::experimental::buffer_location<kOutputBufferLocation>,
+                     sycl::ext::altera::experimental::read_write_mode_write,
+                     sycl::ext::altera::experimental::wait_request_requested})>
+#else
+    // USM pointer, otherwise.
+    dst_T *const
+#endif
+        dst;
+
+    size_t num_packs;
+
+    [[intel::kernel_args_restrict]] void operator()() const {
+#if defined(IS_BSP)
+        sycl::ext::altera::host_ptr<dst_T> dst_ptr(dst);
+#else
+        dst_T *dst_ptr(dst);
+#endif
+        // First, extract the PipeDataT from the pipe
+        using PipeDataType = typename nnet::ExtractPipeType<src_pipe>::value_type;
+        // Then, extract the DataT from StreamingBeat
+        using SrcDataType = typename PipeDataType::value_type;
+        constexpr auto srcTypeSize = std::tuple_size<PipeDataType>{};
+
+        [[intel::fpga_register]] PipeDataType packet;
+
+        // Drain the output pipe and write result to memory.
+        for (size_t i = 0; i < num_packs; i++) {
+            packet = src_pipe::read();
+
+            #pragma unroll 4
+            for (size_t j = 0; j < srcTypeSize; j++) {
+                dst_ptr[i * srcTypeSize + j] = static_cast<dst_T>(packet[j].to_double());
+            }
         }
     }
 };

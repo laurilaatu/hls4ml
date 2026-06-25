@@ -99,7 +99,7 @@ template <class data_pipe, class res_pipe, typename CONFIG_T> void einsum_dense_
 
             // Call the dense_resource function with the reordered weights
             if (!CONFIG_T::opt_dense) {
-                nnet::dense_resource<Dense_in_T, Dense_heads_T, dense_slice_config>(dense_in, dense_out_head);
+                nnet::dense_resource<Dense_in_T, Dense_heads_T, typename CONFIG_T::dense_conf>(dense_in, dense_out_head);
 
                 for (unsigned h = 0; h < CONFIG_T::n_head; h++) {
                     for (unsigned l = 0; l < HEAD_DIM_OUT; l++) {
@@ -108,7 +108,7 @@ template <class data_pipe, class res_pipe, typename CONFIG_T> void einsum_dense_
                     res_pipe::write(dense_out);
                 }
             } else {
-                nnet::dense_resource<Dense_concat_T, Dense_out_T, dense_slice_config>(dense_in_concat, dense_out);
+                nnet::dense_resource<Dense_concat_T, Dense_out_T, typename CONFIG_T::dense_conf>(dense_in_concat, dense_out);
                 res_pipe::write(dense_out);
             }
         }

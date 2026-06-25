@@ -27,8 +27,18 @@ pointwise_conv1d_task_sequence_template = (
     'task_sequence<nnet::pointwise_conv_1d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
 )
 
+pointwise_conv1d_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::pointwise_conv_1d_{data_format}_stream<{input_pipe},'
+    + '{output_pipe}, {config}>,ts_invoc_props> {name};'
+)
+
 pointwise_conv2d_task_sequence_template = (
     'task_sequence<nnet::pointwise_conv_2d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+)
+
+pointwise_conv2d_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::pointwise_conv_2d_{data_format}_stream<{input_pipe},'
+    + '{output_pipe}, {config}>,ts_invoc_props> {name};'
 )
 
 pointwise_conv_stream_function_template = '{name}.async();'
@@ -68,6 +78,12 @@ class PointwiseConv1DTaskSequenceTemplate(TaskSequenceTemplate):
         if node.get_attr('data_format') == 'channels_first':
             raise RuntimeError('channels_first not supported on oneAPI')
         params['data_format'] = 'cl'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = pointwise_conv1d_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
+
         return self.template.format(**params)
 
 
@@ -102,6 +118,12 @@ class PointwiseConv2DTaskSequenceTemplate(TaskSequenceTemplate):
         if node.get_attr('data_format') == 'channels_first':
             raise RuntimeError('channels_first not supported on oneAPI')
         params['data_format'] = 'cl'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = pointwise_conv2d_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
+
         return self.template.format(**params)
 
 

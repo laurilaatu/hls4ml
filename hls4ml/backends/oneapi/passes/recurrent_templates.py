@@ -101,6 +101,9 @@ gru_function_initial_state_template = (
     'nnet::gru_init_state<{input_t}, {h_t}, {output_t}, {config}>({input}, {init_state}, {output});'
 )
 gru_task_sequence_template = 'task_sequence<nnet::gru_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+gru_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::gru_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
 gru_stream_function_template = '{name}.async();'
 
 
@@ -194,6 +197,11 @@ class GRUTaskSequenceTemplate(TaskSequenceTemplate):
 
     def format(self, node):
         params = self._default_function_params(node)
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = gru_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
 
         return self.template.format(**params)
 
