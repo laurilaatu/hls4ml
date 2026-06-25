@@ -137,7 +137,7 @@ template <class data_T, class res_T, typename CONFIG_T> void softmax_stable(cons
 
     // Calculate all the e^x's
     [[intel::fpga_register]] typename CONFIG_T::exp_table_t exp_res[CONFIG_T::n_in];
-    #pragma unroll
+    //#pragma unroll
     for (unsigned i = 0; i < CONFIG_T::n_in; i++) {
         exp_res[i] =
             CONFIG_T::exp_table[softmax_stable_idx_from_real_val<typename CONFIG_T::inp_norm_t, CONFIG_T::exp_table_size>(

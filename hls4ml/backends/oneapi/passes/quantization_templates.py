@@ -6,6 +6,7 @@ from hls4ml.backends.oneapi.passes.core_templates import (
     batchnorm_include_list,
     batchnorm_stream_function_template,
     batchnorm_task_sequence_template,
+    batchnorm_task_sequence_template_max_invoc,
 )
 from hls4ml.backends.template import FunctionCallTemplate, LayerConfigTemplate
 from hls4ml.model.optimizer.passes.qkeras import ApplyAlpha
@@ -46,6 +47,11 @@ class ApplyAlphaTaskSequenceTemplate(TaskSequenceTemplate):
 
     def format(self, node):
         params = self._default_function_params(node)
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = batchnorm_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
 
         return self.template.format(**params)
 

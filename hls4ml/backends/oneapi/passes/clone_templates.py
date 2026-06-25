@@ -18,6 +18,14 @@ class CloneTaskSequenceTemplate(TaskSequenceTemplate):
         output_pipes = ', '.join([f'{{output{i + 1}_pipe}}' for i in range(len(node.outputs))])
 
         template = f'task_sequence<nnet::clone_stream<{{input_pipe}}, {output_pipes}, {{size}}>> {{name}};'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            template = (
+                'task_sequence<nnet::clone_stream<{input_pipe},' + f'{output_pipes}, {{size}}>,ts_invoc_props> {{name}};'
+            )
+            params['maxInvoc'] = max_invoc
+
         return template.format(**params)
 
 

@@ -40,13 +40,13 @@ template <class Dense_in_T, class data_pipe, typename CONFIG_T> void read_token(
     // constexpr unsigned I = CONFIG_T::n_inplace;
 
     data_buff_T buff = data_pipe::read();
-    #pragma unroll
+    #pragma unroll 4
     for (unsigned c = 0; c < C; c++) {
         token_buffer[c] = buff[c];
     }
 }
 
-// todo stream weights and biases too in the future?
+// weights are already transposed during compile-time in the config
 template <class data_pipe, class res_pipe, typename CONFIG_T> void einsum_dense_stream() {
 
     constexpr unsigned L0 = CONFIG_T::n_free_data;
@@ -74,7 +74,7 @@ template <class data_pipe, class res_pipe, typename CONFIG_T> void einsum_dense_
     //#pragma unroll CONFIG_T::parallelization_factor
     for (unsigned l0 = 0; l0 < L0; l0++) {
 
-        #pragma unroll
+        #pragma unroll 4
         for (unsigned i = 0; i < I; i++) {
 
             if (!CONFIG_T::opt_dense)
@@ -90,22 +90,6 @@ template <class data_pipe, class res_pipe, typename CONFIG_T> void einsum_dense_
                 }
             }
 
-            // Reorder weights from column-major (source) to row-major (destination) during copy
-            const unsigned weights_offset = i * L1 * C;
-            #pragma unroll
-            for (unsigned j = 0; j < L1; j++) {
-                #pragma unroll
-                for (unsigned k = 0; k < C; k++) {
-                    dense_weights[j * C + k] = CONFIG_T::weights[weights_offset + (k * L1 + j)];
-                }
-            }
-
-            const unsigned bias_offset = i * L0 * L1;
-            #pragma unroll
-            for (unsigned b_idx = 0; b_idx < L1; b_idx++) {
-                dense_biases[b_idx] = CONFIG_T::biases[bias_offset + L1 * l0 + b_idx];
-            }
-
             // Create a temporary config to ensure the types of the local buffers
             // match what dense_resource expects for its weight_t and bias_t.
             struct dense_slice_config : CONFIG_T::dense_conf {
@@ -115,8 +99,7 @@ template <class data_pipe, class res_pipe, typename CONFIG_T> void einsum_dense_
 
             // Call the dense_resource function with the reordered weights
             if (!CONFIG_T::opt_dense) {
-                nnet::dense_resource<Dense_in_T, Dense_heads_T, dense_slice_config>(dense_in, dense_out_head, dense_weights,
-                                                                                    dense_biases);
+                nnet::dense_resource<Dense_in_T, Dense_heads_T, typename CONFIG_T::dense_conf>(dense_in, dense_out_head);
 
                 for (unsigned h = 0; h < CONFIG_T::n_head; h++) {
                     for (unsigned l = 0; l < HEAD_DIM_OUT; l++) {
@@ -125,8 +108,7 @@ template <class data_pipe, class res_pipe, typename CONFIG_T> void einsum_dense_
                     res_pipe::write(dense_out);
                 }
             } else {
-                nnet::dense_resource<Dense_concat_T, Dense_out_T, dense_slice_config>(dense_in_concat, dense_out,
-                                                                                      dense_weights, dense_biases);
+                nnet::dense_resource<Dense_concat_T, Dense_out_T, typename CONFIG_T::dense_conf>(dense_in_concat, dense_out);
                 res_pipe::write(dense_out);
             }
         }

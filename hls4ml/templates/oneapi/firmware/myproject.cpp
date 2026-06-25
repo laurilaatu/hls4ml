@@ -1,13 +1,16 @@
 #include "myproject.h"
 #include "parameters.h"
-#include <sycl/ext/intel/experimental/task_sequence.hpp>
+//#include "nnet_utils/nnet_dma_helpers.h"
+#include <sycl/ext/altera/experimental/task_sequence.hpp>
 
 // hls-fpga-machine-learning insert weights
 
 // The inter-task pipes need to be declared in the global scope
 // hls-fpga-machine-learning insert inter-task pipes
 
-using sycl::ext::intel::experimental::task_sequence;
+// hls-fpga-machine-learning insert invocation props
+
+using sycl::ext::altera::experimental::task_sequence;
 
 void MyProject::operator()() const {
     // ****************************************

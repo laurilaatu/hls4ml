@@ -36,6 +36,10 @@ batchnorm_quantized_tanh_task_sequence_template = (
     'task_sequence<nnet::normalize_{quantize}_tanh_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
 )
 
+batchnorm_quantized_tanh_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::normalize_{quantize}_tanh_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
+
 batchnorm_quantized_tanh_stream_function_template = '{name}.async({threshold});'
 
 
@@ -82,6 +86,11 @@ class BatchNormalizationQuantizedTanhTaskSequenceTemplate(TaskSequenceTemplate):
             params['quantize'] = 'binary'
         elif node.get_attr('quantize') == 3:
             params['quantize'] = 'ternary'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = batchnorm_quantized_tanh_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
 
         return self.template.format(**params)
 

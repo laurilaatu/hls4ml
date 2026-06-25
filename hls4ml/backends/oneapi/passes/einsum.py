@@ -57,6 +57,10 @@ einsum_streamed_function_template = (
     'task_sequence<nnet::causal_einsum<{input0_pipe}, {input1_pipe}, {output_pipe}, {config}>> {name};'
 )
 
+einsum_stream_function_template_max_invoc = (
+    'task_sequence<nnet::causal_einsum<{input0_pipe}, {input1_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
+
 einsum_include_list = ['nnet_utils/nnet_einsum.h', 'nnet_utils/nnet_causal_einsum.h']
 
 
@@ -195,6 +199,12 @@ class EinsumStreamTaskSequenceTemplate(TaskSequenceTemplate):
         if node.get_attr('data_format') == 'channels_first':
             raise RuntimeError('channels_first not supported on oneAPI')
         params['data_format'] = 'cl'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = einsum_stream_function_template_max_invoc
+            params['maxInvoc'] = max_invoc
+
         return self.template.format(**params)
 
 

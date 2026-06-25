@@ -1,18 +1,30 @@
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <exception>
 #include <fstream>
+#include <immintrin.h>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "firmware/myproject.h"
 #include "firmware/parameters.h"
 
-#include <sycl/ext/intel/fpga_extensions.hpp>
+#include <sycl/ext/altera/fpga_extensions.hpp>
 
+// hls-fpga-machine-learning use host_reads
+
+// For data collection
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+// This lib is irrelevant to Altera HLS
 #if (__INTEL_CLANG_COMPILER < 20250000)
-#include <sycl/ext/intel/prototype/interfaces.hpp>
+//#include <sycl/ext/intel/prototype/interfaces.hpp>
 #endif
 
 #include "exception_handler.hpp"
@@ -23,11 +35,11 @@
 int main(int argc, char **argv) {
 
 #if FPGA_SIMULATOR
-    auto selector = sycl::ext::intel::fpga_simulator_selector_v;
+    auto selector = sycl::ext::altera::fpga_simulator_selector_v;
 #elif FPGA_HARDWARE
-    auto selector = sycl::ext::intel::fpga_selector_v;
+    auto selector = sycl::ext::altera::fpga_selector_v;
 #else // #if FPGA_EMULATOR
-    auto selector = sycl::ext::intel::fpga_emulator_selector_v;
+    auto selector = sycl::ext::altera::fpga_emulator_selector_v;
 #endif
 
     sycl::queue q(selector, fpga_tools::exception_handler, sycl::property::queue::enable_profiling{});
@@ -49,9 +61,114 @@ int main(int argc, char **argv) {
     // load predictions from text file
     std::ifstream fpr("tb_data/tb_output_predictions.dat");
 
+    // Create the tb_data folder
+    if (mkdir("tb_data", 0755) != 0) {
+        if (errno != EEXIST) {
+            perror("mkdir");
+            return 1;
+        } else {
+            std::cout << "Created the tb_data folder" << std::endl;
+        }
+    }
+
+    // Create the log file
     std::string RESULTS_LOG = "tb_data/results.log";
     std::ofstream fout(RESULTS_LOG);
 
+    if (!fout.is_open()) {
+        perror("results.log");
+        return 1;
+    }
+
+    // Set the iterations (number of repeated tests to be performed)
+    const unsigned int num_iterations = 10;
+
+// Pre-define tokens to be filled and generated, REMOVE FOR THE LARGE MODEL
+// This is kept currently since pipes are blocking and models are not guaranteed to predict
+// The EOS token.
+#define PREFILL_TOKENS 32
+#define TOTAL_TOKENS 48
+#define GENERATE_TOKENS (TOTAL_TOKENS - PREFILL_TOKENS)
+
+#if HOST_READS
+
+    // hls-fpga-machine-learning crete host mems
+
+    volatile uint32_t *ttft_flag = sycl::malloc_shared<uint32_t>(1, q);
+    if (ttft_flag == nullptr) {
+        std::cerr << "ERROR: host allocation failed for output\n";
+        fout.close();
+        return 1;
+    }
+
+    std::cout << "INFO: Using a pre-determined input sequence, performing " << num_iterations << " independent tests."
+              << std::endl;
+
+    std::chrono::high_resolution_clock::time_point first_token_time;
+    double average_ts = 0;
+    double average_ttft = 0;
+    double first_ts = 0;
+    double first_ttft = 0;
+
+    // hls-fpga-machine-learning fill inputs
+
+    for (int iteration = 0; iteration < num_iterations; iteration++) {
+
+        // Reset the timing flag
+        *ttft_flag = 0;
+
+        // Start timer
+        auto start = std::chrono::high_resolution_clock::now();
+
+        // Create a new CPU thread to independently pool the TTFT
+        std::thread ttft_thread([&]() {
+            while (*ttft_flag == 0) {
+                _mm_pause();
+            }
+            first_token_time = std::chrono::high_resolution_clock::now();
+        });
+
+        // hls-fpga-machine-learning launch kernels
+
+        auto end = std::chrono::high_resolution_clock::now();
+        ttft_thread.join();
+
+        // Analyse and record data on the host side
+        double ttft = std::chrono::duration<double, std::milli>(first_token_time - start).count();
+        double total_time = std::chrono::duration<double>(end - start).count();
+        double num_tokens = TOTAL_TOKENS;
+        double ts = num_tokens / total_time;
+        average_ts = iteration > 0 ? ((average_ts * iteration + ts) / (iteration + 1)) : ts;
+        average_ttft = iteration > 0 ? ((average_ttft * iteration + ttft) / (iteration + 1)) : ttft;
+        std::cout << "Current TTFT (ms): " << ttft << std::endl;
+        std::cout << "Current Tokens/s: " << ts << std::endl;
+
+        if (iteration == 0) {
+            first_ts = ts;
+            first_ttft = ttft;
+        }
+
+        // hls-fpga-machine-learning write out to file
+    }
+
+    std::cout << num_iterations << " iterations were performed." << std::endl;
+    std::cout << "Average TTFT (ms) was: " << average_ttft << std::endl;
+    std::cout << "Average Tokens/s was: " << average_ts << std::endl;
+
+    // Ignore the first ttft and t/s
+    average_ttft = (average_ttft * num_iterations - first_ttft) / (num_iterations - 1);
+    average_ts = (average_ts * num_iterations - first_ts) / (num_iterations - 1);
+    std::cout << "Average TTFT (ms) after ignoring the first TTFT: " << average_ttft << std::endl;
+    std::cout << "Average Tokens/s after ignoring the first Tokens/s: " << average_ts << std::endl;
+
+    // hls-fpga-machine-learning free host mem
+
+    fout.close();
+    std::cout << "INFO: Saved inference results to file: " << RESULTS_LOG << std::endl;
+
+    return 0;
+
+#else
     std::string iline;
     std::string pline;
 
@@ -79,16 +196,12 @@ int main(int argc, char **argv) {
 
             // hls-fpga-machine-learning insert data
 
-            q.single_task(MyProject{});
+            q.single_task(Myproject{});
 
             // hls-fpga-machine-learning convert output
 
             std::copy(pr.cbegin(), pr.cend(), predictions.back().begin());
 
-            for (auto outval : outputs) {
-                fout << outval << " ";
-            }
-            fout << std::endl;
             if (iteration % CHECKPOINT == 0) {
                 std::cout << "Predictions" << std::endl;
                 // hls-fpga-machine-learning insert predictions
@@ -98,33 +211,21 @@ int main(int argc, char **argv) {
                 std::cout << std::endl;
                 std::cout << "Quantized predictions" << std::endl;
                 // hls-fpga-machine-learning insert quantized
-                for (auto outval : outputs) {
-                    std::cout << outval << " ";
-                }
-                std::cout << std::endl;
             }
         }
         fin.close();
         fpr.close();
     } else {
-        const unsigned int num_iterations = 10;
         std::cout << "INFO: Unable to open input/predictions file, using default input with " << num_iterations
                   << " invocations." << std::endl;
 
         // hls-fpga-machine-learning insert top-level-function
-        for (int i = 0; i < num_iterations; i++) {
+        for (int iteration = 0; iteration < num_iterations; iteration++) {
             // hls-fpga-machine-learning insert zero
-            q.single_task(MyProject{});
-            // hls-fpga-machine-learning convert output
-            for (auto outval : outputs) {
-                std::cout << outval << " ";
-            }
-            std::cout << std::endl;
 
-            for (auto outval : outputs) {
-                fout << outval << " ";
-            }
-            fout << std::endl;
+            q.single_task(Myproject{});
+
+            // hls-fpga-machine-learning convert output
         }
     }
     q.wait();
@@ -133,4 +234,5 @@ int main(int argc, char **argv) {
     std::cout << "INFO: Saved inference results to file: " << RESULTS_LOG << std::endl;
 
     return 0;
+#endif
 }

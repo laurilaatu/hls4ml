@@ -20,6 +20,7 @@ dense_config_template = """struct config{index}_dense : nnet::dense_config {{
     static constexpr unsigned bf_pad = 0;
 
     static constexpr unsigned reuse_factor = {reuse};
+    static constexpr unsigned num_banks = DIV_ROUNDUP(n_in, reuse_factor);
     static constexpr unsigned compressed_block_factor = DIV_ROUNDUP(n_nonzeros, reuse_factor);
     static constexpr unsigned reuse_factor_rounded = reuse_factor + rf_pad;
     static constexpr unsigned block_factor = DIV_ROUNDUP(n_in*n_out, reuse_factor);
@@ -31,6 +32,11 @@ dense_config_template = """struct config{index}_dense : nnet::dense_config {{
     typedef {accum_t.name} accum_t;
     typedef {bias_t.name} bias_t;
     typedef {weight_t.name} weight_t;
+
+    // Transpose at compile-time since einsum_dense_stream should not lose time.
+    [[intel::fpga_memory, intel::numbanks(num_banks),
+    intel::bankwidth(sizeof(weight_t::value_type))]] static constexpr weight_t weights = tpose<weight_t,{n_in},{n_out}>({w});
+    static constexpr bias_t biases = {b};
 
     template<class x_T, class y_T>
     using product = nnet::product::{product_type}<x_T, y_T>;
@@ -80,6 +86,10 @@ einsum_dense_stream_function_template = (
     'task_sequence<nnet::einsum_dense_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
 )
 
+einsum_dense_stream_function_template_max_invoc = (
+    'task_sequence<nnet::einsum_dense_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
+
 einsum_dense_stream_function_template_async = '{name}.async();'
 
 einsum_dense_include_list = ['nnet_utils/nnet_einsum_dense_stream.h', 'nnet_utils/nnet_dense.h']
@@ -93,6 +103,9 @@ class EinsumDenseConfigTemplate(LayerConfigTemplate):
 
     def dense_config(self, node: EinsumDense):
         dense_params = self._default_config_params(node)
+
+        dense_params['w'] = node.get_weights('weight').name
+        dense_params['b'] = node.get_weights('bias').name
 
         dense_params['n_in'] = node.attributes['n_contract']
         dense_params['n_out'] = node.attributes['n_free_kernel']
@@ -219,6 +232,11 @@ class EinsumStreamTaskSequenceTemplate(TaskSequenceTemplate):
         if node.get_attr('data_format') == 'channels_first':
             raise RuntimeError('channels_first not supported on oneAPI')
         params['data_format'] = 'cl'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = einsum_dense_stream_function_template_max_invoc
+            params['maxInvoc'] = max_invoc
 
         return self.template.format(**params)
 

@@ -57,7 +57,9 @@ conv1d_config_template = """struct config{index} : nnet::conv1d_config {{
     typedef {weight_t.name} weight_t;
     typedef {config_t} mult_config;
 
-    static constexpr weight_t weights = {weights};
+    static constexpr unsigned num_banks = DIV_ROUNDUP(n_chan, reuse_factor);
+    [[intel::fpga_memory, intel::numbanks(num_banks),
+    intel::bankwidth(sizeof(weight_t::value_type))]] static constexpr weight_t weights = {weights};
     static constexpr bias_t biases = {biases};
 }};
 """
@@ -66,6 +68,10 @@ conv1d_function_template = 'nnet::conv_1d_{data_format}<{input_t}, {output_t}, {
 
 conv1d_task_sequence_template = (
     'task_sequence<nnet::conv_1d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+)
+
+conv1d_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::conv_1d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
 )
 
 conv_stream_function_template = '{name}.async();'
@@ -137,6 +143,12 @@ class Conv1DTaskSequenceTemplate(TaskSequenceTemplate):
         if node.get_attr('data_format') == 'channels_first':
             raise RuntimeError('channels_first not supported on oneAPI')
         params['data_format'] = 'cl'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = conv1d_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
+
         return self.template.format(**params)
 
 
@@ -191,7 +203,10 @@ conv2d_config_template = """struct config{index} : nnet::conv2d_config {{
     typedef {weight_t.name} weight_t;
     typedef {config_t} mult_config;
 
-    static constexpr weight_t weights = {weights};
+    // This part needs testing
+    static constexpr unsigned num_banks = DIV_ROUNDUP(n_chan, reuse_factor);
+    [[intel::fpga_memory, intel::numbanks(num_banks),
+    intel::bankwidth(sizeof(weight_t::value_type))]] static constexpr weight_t weights = {weights};
     static constexpr bias_t biases = {biases};
 
 }};\n"""

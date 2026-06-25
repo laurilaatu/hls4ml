@@ -87,6 +87,23 @@ global_pooling2d_task_sequence_template = (
     'task_sequence<nnet::global_pooling2d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>>({name});'
 )
 
+pooling1d_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::pooling1d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props>({name});'
+)
+pooling2d_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::pooling2d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props>({name});'
+)
+
+global_pooling1d_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::global_pooling1d_{data_format}_stream<{input_pipe},'
+    + '{output_pipe}, {config}>,ts_invoc_props>({name});'
+)
+
+global_pooling2d_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::global_pooling2d_{data_format}_stream<{input_pipe},'
+    + '{output_pipe}, {config}>,ts_invoc_props>({name});'
+)
+
 pooling_stream_function_template = '{name}.async();'
 
 pooling_include_list = ['nnet_utils/nnet_pooling.h', 'nnet_utils/nnet_pooling_stream.h']
@@ -140,6 +157,17 @@ class PoolingTaskSequenceTemplate(TaskSequenceTemplate):
         if node.get_attr('data_format') == 'channels_first':
             raise Exception('channels_first not supported for oneAPI')
         params['data_format'] = 'cl'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.templates = {
+                'Pooling1D': pooling1d_task_sequence_template_max_invoc,
+                'Pooling2D': pooling2d_task_sequence_template_max_invoc,
+                'GlobalPooling1D': global_pooling1d_task_sequence_template_max_invoc,
+                'GlobalPooling2D': global_pooling2d_task_sequence_template_max_invoc,
+            }
+            params['maxInvoc'] = max_invoc
+
         return self.templates[node.class_name].format(**params)
 
 

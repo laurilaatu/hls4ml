@@ -39,6 +39,13 @@ zeropad2d_task_sequence_template = (
     'task_sequence<nnet::zeropad2d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
 )
 
+zeropad1d_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::zeropad1d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
+zeropad2d_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::zeropad2d_{data_format}_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
+
 reshaping_stream_function_template = '{name}.async();'
 
 padding_include_list = ['nnet_utils/nnet_padding.h', 'nnet_utils/nnet_padding_stream.h']
@@ -88,6 +95,14 @@ class ZeroPaddingTaskSequenceTemplate(TaskSequenceTemplate):
             raise RuntimeError('channels_first not supported on oneAPI')
         params['data_format'] = 'cl'
 
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.templates = {
+                'ZeroPadding1D': zeropad1d_task_sequence_template_max_invoc,
+                'ZeroPadding2D': zeropad2d_task_sequence_template_max_invoc,
+            }
+            params['maxInvoc'] = max_invoc
+
         return self.templates[node.class_name].format(**params)
 
 
@@ -117,6 +132,9 @@ resize_config_template = """struct config{index} : nnet::resize_config {{
 resize_function_template = 'nnet::resize_{algorithm}<{input_t}, {output_t}, {config}>({input}, {output});'
 resize_task_sequence_template = (
     'task_sequence<nnet::resize_{algorithm}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+)
+resize_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::resize_{algorithm}_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
 )
 resize_include_list = ['nnet_utils/nnet_resize.h', 'nnet_utils/nnet_resize_stream.h']
 
@@ -156,6 +174,11 @@ class ResizeTaskSequenceTemplate(TaskSequenceTemplate):
         if node.get_attr('algorithm') != 'nearest':
             raise Exception('Currently only supporting resize_nearest')
         params['algorithm'] = node.get_attr('algorithm')
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = resize_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
 
         return self.template.format(**params)
 
@@ -216,6 +239,9 @@ class TransposeTaskSequenceTemplate(TaskSequenceTemplate):
 
 # Reshape template (only used in streaming)
 reshape_task_sequence_template = 'task_sequence<nnet::repack_stream<{input_pipe}, {output_pipe}, {size}>> {name};'
+reshape_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::repack_stream<{input_pipe}, {output_pipe}, {size}>,ts_invoc_props> {name};'
+)
 reshape_include_list = ['nnet_utils/nnet_stream.h']
 
 
@@ -245,4 +271,10 @@ class ReshapeTaskSequenceTemplate(TaskSequenceTemplate):
     def format(self, node):
         params = self._default_function_params(node)
         params['size'] = int(np.prod(node.get_output_variable().shape))
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = reshape_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
+
         return self.template.format(**params)
