@@ -50,9 +50,8 @@ class EmbeddingFunctionTemplate(FunctionCallTemplate):
 
     def format(self, node):
         params = self._default_function_params(node)
-        
-        return self.template.format(**params)
 
+        return self.template.format(**params)
 
 class EmbeddingTaskSequenceTemplate(TaskSequenceTemplate):
     def __init__(self):
@@ -77,6 +76,5 @@ class EmbeddingStreamFunctionTemplate(StreamFunctionCallTemplate):
 
     def format(self, node):
         params = self._default_function_params(node)
-        params['e'] = node.get_weights('embeddings').name
 
         return self.template.format(**params)
