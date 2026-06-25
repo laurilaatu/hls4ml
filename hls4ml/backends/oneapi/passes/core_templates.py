@@ -37,6 +37,9 @@ dense_config_template = """struct config{index} : nnet::dense_config {{
 
 dense_function_template = 'nnet::dense_{strategy}<{input_t}, {output_t}, {config}>({input}, {output}, {w}, {b});'
 dense_task_sequence_template = 'task_sequence<nnet::dense_{strategy}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+dense_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::dense_{strategy}_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
 dense_stream_function_template = '{name}.async({w}, {b});'
 dense_include_list = ['nnet_utils/nnet_dense.h', 'nnet_utils/nnet_dense_stream.h']
 
@@ -78,6 +81,11 @@ class DenseTaskSequenceTemplate(TaskSequenceTemplate):
     def format(self, node):
         params = self._default_function_params(node)
 
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = dense_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
+
         return self.template.format(**params)
 
 
@@ -110,6 +118,9 @@ batchnorm_config_template = """struct config{index} : nnet::batchnorm_config {{
 
 batchnorm_function_template = 'nnet::normalize<{input_t}, {output_t}, {config}>({input}, {output}, {scale}, {bias});'
 batchnorm_task_sequence_template = 'task_sequence<nnet::normalize_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+batchnorm_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::normalize_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
 batchnorm_stream_function_template = '{name}.async({scale}, {bias});'
 batchnorm_include_list = ['nnet_utils/nnet_batchnorm.h', 'nnet_utils/nnet_batchnorm_stream.h']
 
@@ -149,6 +160,11 @@ class BatchNormalizationTaskSequenceTemplate(TaskSequenceTemplate):
 
     def format(self, node):
         params = self._default_function_params(node)
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = batchnorm_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
 
         return self.template.format(**params)
 
@@ -195,6 +211,7 @@ hard_activ_config_template = """struct {type}_config{index} : nnet::activ_config
 
 softmax_config_template = """struct {type}_config{index} : nnet::activ_config {{
     static constexpr unsigned n_in = {n_in};
+    static constexpr unsigned table_size = {table_size};
     static constexpr unsigned exp_table_size = {exp_table_size};
     static constexpr unsigned inv_table_size = {inv_table_size};
     static constexpr unsigned io_type = nnet::{iotype};
@@ -203,24 +220,45 @@ softmax_config_template = """struct {type}_config{index} : nnet::activ_config {{
     typedef {exp_table_t.name} exp_table_t;
     typedef {inv_table_t.name} inv_table_t;"""
 
+# softmax_config_table_template = """
+#
+#    static constexpr const exp_table_t *exp_table = &{exp_table_name}[0];
+#    static constexpr const inv_table_t *invert_table = &{inv_table_name}[0];
+# }};\n"""
+
 softmax_config_table_template = """
 
-    static constexpr const exp_table_t *exp_table = &{exp_table_name}[0];
-    static constexpr const inv_table_t *invert_table = &{inv_table_name}[0];
+    using {exp_table_name}_arr_t = nnet::array<exp_table_t, exp_table_size>;
+    using {inv_table_name}_arr_t = nnet::array<inv_table_t, inv_table_size>;
+    static constexpr const {exp_table_name}_arr_t exp_table = {exp_table_name};
+    static constexpr const {inv_table_name}_arr_t invert_table = {inv_table_name};
 }};\n"""
+
+# softmax_config_table_template_stable = """
+#    typedef {inv_inp_t.name} inv_inp_t;
+#    typedef {inp_norm_t.name} inp_norm_t;
+#
+#    static constexpr const exp_table_t *exp_table = &{exp_table_name}[0];
+#    static constexpr const inv_table_t *invert_table = &{inv_table_name}[0];
+# }};\n"""
 
 softmax_config_table_template_stable = """
     typedef {inv_inp_t.name} inv_inp_t;
     typedef {inp_norm_t.name} inp_norm_t;
 
-    static constexpr const exp_table_t *exp_table = &{exp_table_name}[0];
-    static constexpr const inv_table_t *invert_table = &{inv_table_name}[0];
+    using {exp_table_name}_arr_t = nnet::array<exp_table_t, exp_table_size>;
+    using {inv_table_name}_arr_t = nnet::array<inv_table_t, inv_table_size>;
+    static constexpr const {exp_table_name}_arr_t exp_table = {exp_table_name};
+    static constexpr const {inv_table_name}_arr_t invert_table = {inv_table_name};
 }};\n"""
 
 activ_function_template = 'nnet::{activation}<{input_t}, {output_t}, {config}>({input}, {output});'
 param_activ_function_template = 'nnet::{activation}<{input_t}, {output_t}, {config}>({input}, {param}, {output});'
 
 activ_task_sequence_template = 'task_sequence<nnet::{activation}_stream<{input_pipe}, {output_pipe}, {config}>> {name};'
+activ_task_sequence_template_max_invoc = (
+    'task_sequence<nnet::{activation}_stream<{input_pipe}, {output_pipe}, {config}>,ts_invoc_props> {name};'
+)
 activ_stream_function_template = '{name}.async();'
 param_activ_stream_function_template = '{name}.async({param});'
 
@@ -246,6 +284,8 @@ class ActivationConfigTemplate(LayerConfigTemplate):
                 params['exp_table_t'].precision.integer = 3
                 params['exp_table_t'].precision.signed = False
 
+            params.setdefault('table_size', params['exp_table_size'])
+
             if 'inp_norm_t' not in params:
                 input_t = node.get_input_variable().type.precision
                 width, iwidth, signed = input_t.width, input_t.integer, input_t.signed  # noqa: F841
@@ -261,9 +301,7 @@ class ActivationConfigTemplate(LayerConfigTemplate):
                     params['inp_norm_t'].precision.signed = True
                     params['inp_norm_t'].name = f'{node.name}_inp_norm_t'
                 else:
-                    params[
-                        'inp_norm_t'
-                    ].name = f'ac_fixed<{width},{iwidth},{"true" if signed else "false"},AC_RND,AC_SAT_SYM>'
+                    params['inp_norm_t'].name = f'ac_fixed<{width},{iwidth},{str(signed).lower()},AC_RND,AC_SAT_SYM>'
 
                 node.set_attr('inp_norm_t', params['inp_norm_t'])
 
@@ -281,9 +319,9 @@ class ActivationConfigTemplate(LayerConfigTemplate):
                 params['inv_inp_t'].precision.signed = True
 
             if params['implementation'] == 'stable':
-                self.template += softmax_config_table_template_stable
+                self.template = softmax_config_template + softmax_config_table_template_stable
             else:
-                self.template += softmax_config_table_template
+                self.template = softmax_config_template + softmax_config_table_template
 
             params['exp_table_name'] = node.name + '_exp_table'
             params['inv_table_name'] = node.name + '_inv_table'
@@ -371,6 +409,12 @@ class ActivationTaskSequenceTemplate(TaskSequenceTemplate):
         params = self._default_function_params(node)
         params['activation'] = node.get_attr('activation').lower()
         params['config'] = f'{node.get_attr("activation")}_config{node.index}'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = activ_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
+
         return self.template.format(**params)
 
 
@@ -383,6 +427,12 @@ class ParametrizedActivationTaskSequenceTemplate(TaskSequenceTemplate):
         params = self._default_function_params(node)
         params['activation'] = node._get_act_function_name()
         params['config'] = f'{node.get_attr("activation")}_config{node.index}'
+
+        max_invoc = node.model.config.get_config_value('HLSConfig').setdefault('MaxInvoc', None)
+        if max_invoc is not None:
+            self.template = activ_task_sequence_template_max_invoc
+            params['maxInvoc'] = max_invoc
+
         return self.template.format(**params)
 
 
