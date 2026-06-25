@@ -237,9 +237,7 @@ class OneAPIWriter(Writer):
                 elif '// hls-fpga-machine-learning insert inputs' in line:
                     newline = line
                     for inp in model_inputs:
-                        newline += inp.declare_cpp(
-                            pipe_min_size=min(64, math.prod([int(it) for it in inp.size_cpp().split('*')]))
-                        )  # TODO: Find a more robust sizing for custom packing types
+                        newline += inp.declare_cpp(pipe_min_size=inp.pragma[1] if inp.pragma[0] == 'stream' else 16)
 
                 # Insert weights
                 elif '// hls-fpga-machine-learning insert weights' in line:
@@ -253,9 +251,7 @@ class OneAPIWriter(Writer):
                 elif '// hls-fpga-machine-learning insert outputs' in line:
                     newline = line
                     for out in model_outputs:
-                        newline += out.declare_cpp(
-                            pipe_min_size=min(64, math.prod([int(it) for it in out.size_cpp().split('*')]))
-                        )  # TODO: Find a more robust sizing for custom packing types
+                        newline += out.declare_cpp(pipe_min_size=out.pragma[1] if out.pragma[0] == 'stream' else 16)
 
                 # Simply copy line, if no inserts are required
                 else:
