@@ -1,4 +1,3 @@
-.gitignore
 *.pyc
 _version.py
 __pycache__
@@ -14,7 +13,6 @@ docs/_build
 docs/autodoc/*
 hls4mlprj_*
 *~
+*.ipynb
 *.ipynb_checkpoints/
 *.bak
-hls4ml/templates/oneapi/firmware/nnet_utils_bu/
-hls4ml/templates/oneapi/firmware/nnet_utils/activation_tables/
