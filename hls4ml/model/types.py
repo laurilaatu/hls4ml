@@ -5,6 +5,7 @@ The Precision types are given names for convenience (``NamedType``). Named types
 higher-dimensional tensors, which are defined as arrays or FIFO streams in the generated code.
 """
 
+import math
 from enum import Enum
 
 import numpy as np
@@ -433,6 +434,9 @@ class UnspecifiedPrecisionType(PrecisionType):
     def __init__(self):
         super().__init__(width=0, signed=False)
 
+    def __str__(self):
+        return 'auto'
+
 
 def find_minimum_width(data, signed=True):
     """
@@ -837,7 +841,7 @@ class ExponentWeightVariable(WeightVariable):
 
     def __iter__(self):
         data = self._format()
-        self._iterator = iter(data.reshape((np.product(data.shape[:-1]), 2)))
+        self._iterator = iter(data.reshape((math.prod(data.shape[:-1]), 2)))
         return self
 
     def __next__(self):

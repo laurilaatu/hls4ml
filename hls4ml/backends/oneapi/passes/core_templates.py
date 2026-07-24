@@ -2,7 +2,6 @@ from hls4ml.backends.backend import get_backend
 from hls4ml.backends.oneapi.oneapi_template import StreamFunctionCallTemplate, TaskSequenceTemplate
 from hls4ml.backends.template import FunctionCallTemplate, LayerConfigTemplate
 from hls4ml.model.layers import Activation, BatchNormalization, Dense, HardActivation, ParametrizedActivation, PReLU, Softmax
-from hls4ml.utils.fixed_point_utils import ceil_log2
 
 # Dense templates
 
@@ -195,26 +194,42 @@ hard_activ_config_template = """struct {type}_config{index} : nnet::activ_config
 
 softmax_config_template = """struct {type}_config{index} : nnet::activ_config {{
     static constexpr unsigned n_in = {n_in};
+
+    // For multi-dim softmax
+    static const unsigned n_slice = {n_slice};
+    static const unsigned n_outer = {n_outer};
+    static const unsigned n_inner = {n_inner};
+
+    // For legacy softmax
+    typedef {table_t.name} table_t;
+    static constexpr unsigned table_size = {table_size};
+
     static constexpr unsigned exp_table_size = {exp_table_size};
     static constexpr unsigned inv_table_size = {inv_table_size};
     static constexpr unsigned io_type = nnet::{iotype};
     static constexpr unsigned reuse_factor = {reuse};
+
     static constexpr nnet::softmax_implementation implementation = nnet::softmax_implementation::{implementation};
+    typedef {smax_accum_t} accum_t;
     typedef {exp_table_t.name} exp_table_t;
     typedef {inv_table_t.name} inv_table_t;"""
 
 softmax_config_table_template = """
 
-    static constexpr const exp_table_t *exp_table = &{exp_table_name}[0];
-    static constexpr const inv_table_t *invert_table = &{inv_table_name}[0];
+    using {exp_table_name}_arr_t = nnet::array<exp_table_t, exp_table_size>;
+    using {inv_table_name}_arr_t = nnet::array<inv_table_t, inv_table_size>;
+    static constexpr const {exp_table_name}_arr_t exp_table = {exp_table_name};
+    static constexpr const {inv_table_name}_arr_t invert_table = {inv_table_name};
 }};\n"""
 
 softmax_config_table_template_stable = """
     typedef {inv_inp_t.name} inv_inp_t;
     typedef {inp_norm_t.name} inp_norm_t;
 
-    static constexpr const exp_table_t *exp_table = &{exp_table_name}[0];
-    static constexpr const inv_table_t *invert_table = &{inv_table_name}[0];
+    using {exp_table_name}_arr_t = nnet::array<exp_table_t, exp_table_size>;
+    using {inv_table_name}_arr_t = nnet::array<inv_table_t, inv_table_size>;
+    static constexpr const {exp_table_name}_arr_t exp_table = {exp_table_name};
+    static constexpr const {inv_table_name}_arr_t invert_table = {inv_table_name};
 }};\n"""
 
 activ_function_template = 'nnet::{activation}<{input_t}, {output_t}, {config}>({input}, {output});'
@@ -234,57 +249,34 @@ class ActivationConfigTemplate(LayerConfigTemplate):
 
     def format(self, node):
         params = self._default_config_params(node)
-        params['type'] = node.get_attr('activation')
+        params['type'] = node.get_attr('activation').lower()
 
-        if params['type'] == 'softmax':
-            if 'exp_table_size' in params:
-                params['exp_table_size'] //= 2
-            else:
-                params['exp_table_size'] = 1024
+        if (params['type'] == 'softmax') or (params['type'] == 'softmax_multidim'):
+            # If no table size is specified, assume default size of 1024
+            params.setdefault('exp_table_size', params['table_size'])
+            params.setdefault('inv_table_size', params['table_size'])
+            params['exp_table_size'] = min(params['exp_table_size'], params['table_size'])
+            params['inv_table_size'] = min(params['inv_table_size'], params['table_size'])
 
-                params['exp_table_t'].precision.width = ceil_log2(params['exp_table_size'])
-                params['exp_table_t'].precision.integer = 3
-                params['exp_table_t'].precision.signed = False
+            # This is for non-quantised layers where table size is not a layer attribute
+            if node.get_attr('exp_table_size', -1) == -1:
+                node.set_attr('exp_table_size', params['exp_table_size'])
 
-            if 'inp_norm_t' not in params:
-                input_t = node.get_input_variable().type.precision
-                width, iwidth, signed = input_t.width, input_t.integer, input_t.signed  # noqa: F841
-                width, iwidth = width - signed, iwidth - signed
-                import copy
+            if node.get_attr('inv_table_size', -1) == -1:
+                node.set_attr('inv_table_size', params['inv_table_size'])
 
-                params['inp_norm_t'] = copy.deepcopy(params['exp_table_t'])  # assign type,later override
+            params.setdefault('exp_scale', 1.0)
+            params.setdefault('parallelization_factor', -1)
 
-                # this checks if table sizes will be default, if it is just use the table size to derive precision
-                if 'inv_table_size' not in params:
-                    params['inp_norm_t'].precision.width = params['exp_table_t'].precision.width + 1
-                    params['inp_norm_t'].precision.integer = params['exp_table_t'].precision.integer + 1
-                    params['inp_norm_t'].precision.signed = True
-                    params['inp_norm_t'].name = f'{node.name}_inp_norm_t'
-                else:
-                    params['inp_norm_t'].name = f'ac_fixed<{width},{iwidth},{str(signed).lower()},AC_RND,AC_SAT_SYM>'
-
-                node.set_attr('inp_norm_t', params['inp_norm_t'])
-
-            if 'inv_table_size' in params:
-                params['inv_table_size'] //= 2
-            else:
-                params['inv_table_size'] = 1024
-
-                params['inv_table_t'].precision.width = ceil_log2(params['inv_table_size'])
-                params['inv_table_t'].precision.integer = 3
-                params['inv_table_t'].precision.signed = False
-
-                params['inv_inp_t'].precision.width = params['inv_table_t'].precision.width + 1
-                params['inv_inp_t'].precision.integer = params['inv_table_t'].precision.integer + 1
-                params['inv_inp_t'].precision.signed = True
-
-            if params['implementation'] == 'stable':
-                self.template += softmax_config_table_template_stable
-            else:
-                self.template += softmax_config_table_template
+            n_slice = params['n_in'] // params['n_inner'] // params['n_outer']
+            params['n_slice'] = n_slice
 
             params['exp_table_name'] = node.name + '_exp_table'
             params['inv_table_name'] = node.name + '_inv_table'
+            params['smax_accum_t'] = params['accum_t'].name
+
+            if params['implementation'] == 'stable':
+                self.template = softmax_config_template + softmax_config_table_template_stable
 
         return self.template.format(**params)
 
@@ -316,7 +308,7 @@ class HardActivationConfigTemplate(LayerConfigTemplate):
 class SoftmaxConfigTemplate(ActivationConfigTemplate):
     def __init__(self):
         super(ActivationConfigTemplate, self).__init__(Softmax)  # Skip ActivationConfigTemplate's __init__
-        self.template = softmax_config_template
+        self.template = softmax_config_template + softmax_config_table_template
 
 
 class ActivationFunctionTemplate(FunctionCallTemplate):
@@ -369,6 +361,7 @@ class ActivationTaskSequenceTemplate(TaskSequenceTemplate):
         params = self._default_function_params(node)
         params['activation'] = node.get_attr('activation').lower()
         params['config'] = f'{node.get_attr("activation")}_config{node.index}'
+
         return self.template.format(**params)
 
 
